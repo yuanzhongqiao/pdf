@@ -4,7 +4,7 @@ import pytesseract
 from PIL import Image
 import fitz
 import io
-from transformers import pipeline
+# from transformers import pipeline
 import requests
 import os
 
@@ -38,10 +38,10 @@ headers = {"Authorization": f"Bearer {my_token}"}
 pipe = pipeline("text-generation", model="mistralai/Mixtral-8x7B-v0.1", token = my_token)
 
 def query(payload):
-	# response = requests.post(API_URL, headers=headers, json=payload)
+	response = requests.post(API_URL, headers=headers, json=payload)
     
-	# return response.json()
-    return pipe(payload)
+	return response.json()
+    # return pipe(payload)
 	
 
 
