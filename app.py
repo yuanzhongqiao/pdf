@@ -35,7 +35,7 @@ def find_most_relevant_context(contexts, question, max_features=10000):
 
 API_URL = "https://api-inference.huggingface.co/models/google/gemma-7b"
 API_URL_2 = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-v0.1"
-API_URL_LLMA = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B"
+API_URL_LLMA = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
 headers = {"Authorization": f"Bearer {my_token}"}
 # pipe = pipeline("text-generation", model="mistralai/Mixtral-8x7B-v0.1", token = my_token)
 
