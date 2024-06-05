@@ -8,23 +8,46 @@ import io
 import requests
 import os
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-
-
+import faiss
+import numpy as np
+from transformers import AutoTokenizer, AutoModel
+import torch
 my_token = os.getenv('my_repo_token')
-def find_most_relevant_context(contexts, question, max_features=10000):
-    # Vectorize contexts and question with limited features
-    tfidf_vectorizer = TfidfVectorizer(max_features=max_features)
-    tfidf_matrix = tfidf_vectorizer.fit_transform([question] + contexts)
+# Function to get embeddings using a pre-trained model
+def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModel.from_pretrained(model_name)
     
-    # Compute cosine similarity between question and contexts
-    similarity_scores = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
+    inputs = tokenizer(texts, return_tensors='pt', padding=True, truncation=True)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
     
-    # Get index of context with highest similarity
-    most_relevant_index = similarity_scores.argmax()
+    return embeddings
+
+# Function to find the most relevant context using FAISS
+def find_most_relevant_context_faiss(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
+    # Get embeddings for contexts and question
+    all_texts = [question] + contexts
+    embeddings = get_embeddings(all_texts, model_name=model_name)
     
+    # Separate the question embedding and context embeddings
+    question_embedding = embeddings[0]
+    context_embeddings = embeddings[1:]
+    
+    # Create a FAISS index and add context embeddings
+    dimension = context_embeddings.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(context_embeddings)
+    
+    # Search for the nearest neighbor to the question embedding
+    _, indices = index.search(question_embedding.reshape(1, -1), 1)
+    
+    # Get the most relevant context
+    most_relevant_index = indices[0][0]
     return contexts[most_relevant_index]
+
+
 
 
 
