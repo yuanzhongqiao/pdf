@@ -26,7 +26,7 @@ def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     return embeddings
 
 # Function to find the most relevant context using FAISS
-def find_most_relevant_context_faiss(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
+def find_most_relevant_context(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     # Get embeddings for contexts and question
     all_texts = [question] + contexts
     embeddings = get_embeddings(all_texts, model_name=model_name)
