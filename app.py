@@ -77,8 +77,8 @@ def answer_question_from_pdf(pdf_text, question):
     # This function should return the answer to the question based on the PDF content
     # Here we just return a mock response
  
-    return query(   {"inputs": "Based on this content: " + pdf_text+" The Question is: "+ question + " Provide the answer with max lenghth of about 100",})
-
+    answer = query(   {"inputs": "Based on this content: " + pdf_text+" The Question is: "+ question + " Provide the answer with max lenghth of about 100",})
+    return answer[0]["generated_tex"]
 # Function to extract text from PDF
 def extract_text_from_pdf(pdf_file):
     pdf_reader = PdfReader(pdf_file)
