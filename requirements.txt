@@ -6,4 +6,5 @@ pytesseract
 pillow
 tensorflow
 torch
-faiss
+faiss-cpu
+numpy
