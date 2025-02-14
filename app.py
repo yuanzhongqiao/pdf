@@ -11,6 +11,8 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModel
 import torch
 from rank_bm25 import BM25Okapi
+import json
+
 my_token = os.getenv('my_repo_token')
 
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
@@ -51,12 +53,19 @@ headers = {"Authorization": f"Bearer {my_token}"}
 
 def query(payload):
     response = requests.post(API_URL_LLMA, headers=headers, json=payload, stream=True)
+    collected_text = ""
     for chunk in response.iter_content(chunk_size=1024):
         if chunk:
-            yield chunk.decode()
+            try:
+                chunk_data = json.loads(chunk.decode())
+                if "generated_text" in chunk_data:
+                    collected_text += chunk_data["generated_text"]
+                    yield collected_text
+            except json.JSONDecodeError:
+                continue
 
 def answer_question_from_pdf(pdf_text, question):
-    return query({"inputs": "Based on this content: " + pdf_text + " The Question is: " + question + " Provide the answer with max length of about 100"})
+    return query({"inputs": f"Based on this content: {pdf_text} The Question is: {question} Provide the answer with max length of about 100 words."})
 
 def extract_text_from_pdf(pdf_file):
     pdf_reader = PdfReader(pdf_file)
@@ -81,8 +90,8 @@ if uploaded_file is not None:
             response_container = st.empty()
             full_response = ""
             for chunk in answer_question_from_pdf(" ".join(combined_results), question):
-                full_response += chunk
-                response_container.write(full_response)  # Keep appending text
+                full_response = chunk  # Keep updating the full response
+                response_container.write(full_response)  # Display progressively
         else:
             st.write("Please enter a question.")
 else:
