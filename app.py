@@ -11,7 +11,7 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModel
 import torch
 from rank_bm25 import BM25Okapi
-my_token = os.getenv('my_repo_token')
+\my_token = os.getenv('my_repo_token')
 
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -78,9 +78,11 @@ if uploaded_file is not None:
     
     if st.button("Get Answer"):
         if question:
-            with st.empty():
-                for chunk in answer_question_from_pdf(" ".join(combined_results), question):
-                    st.write(chunk, end="", flush=True)
+            response_container = st.empty()
+            full_response = ""
+            for chunk in answer_question_from_pdf(" ".join(combined_results), question):
+                full_response += chunk
+                response_container.write(full_response)  # Keep appending text
         else:
             st.write("Please enter a question.")
 else:
