@@ -73,7 +73,9 @@ def rerank_results(results, question):
     scored_results = []
     for doc in results:
         input_text = question + " [SEP] " + doc  # Ensure input is a single string
-        score = reranker([input_text])[0]['score']  # Pass raw text, pipeline auto-tokenizes
+        tokenizer = AutoTokenizer.from_pretrained(reranker_model)
+        encoded_input = tokenizer(input_text, max_length=512, truncation=True, return_tensors='pt')
+        score = reranker(tokenizer.decode(encoded_input['input_ids'][0]))[0]['score'] 
         scored_results.append((doc, score))
     
     scored_results.sort(key=lambda x: x[1], reverse=True)
