@@ -12,7 +12,7 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 from rank_bm25 import BM25Okapi
 import json
-
+import time
 from transformers import pipeline
 
 my_token = os.getenv('my_repo_token')
@@ -67,11 +67,18 @@ def query(payload):
                 continue
 
 def rerank_results(results, question):
-    reranker = pipeline("text-classification", model="cross-encoder/ms-marco-MiniLM-L-6-v2", framework="pt")
-    scored_results = [(doc, reranker(question + " [SEP] " + doc)[0]['score']) for doc in results]
+    reranker_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    tokenizer = AutoTokenizer.from_pretrained(reranker_model)
+    reranker = pipeline("text-classification", model=reranker_model, framework="pt")
+    
+    scored_results = []
+    for doc in results:
+        encoded_input = tokenizer(question + " [SEP] " + doc, max_length=512, truncation=True, return_tensors="pt")
+        score = reranker(encoded_input)[0]['score']
+        scored_results.append((doc, score))
+    
     scored_results.sort(key=lambda x: x[1], reverse=True)
     return [doc for doc, _ in scored_results]
-
 
 def answer_question_from_pdf(pdf_text, question):
     return query({"inputs": f"Based on this content: {pdf_text} The Question is: {question} Provide the answer with max length of about 100 words."})
