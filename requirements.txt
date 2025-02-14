@@ -8,3 +8,4 @@ tensorflow
 torch
 faiss-cpu
 numpy
+rank-bm25
