@@ -67,10 +67,11 @@ def query(payload):
                 continue
 
 def rerank_results(results, question):
-    reranker = pipeline("text-classification", model="cross-encoder/ms-marco-MiniLM-L-6-v2")
+    reranker = pipeline("text-classification", model="cross-encoder/ms-marco-MiniLM-L-6-v2", framework="pt")
     scored_results = [(doc, reranker(question + " [SEP] " + doc)[0]['score']) for doc in results]
     scored_results.sort(key=lambda x: x[1], reverse=True)
     return [doc for doc, _ in scored_results]
+
 
 def answer_question_from_pdf(pdf_text, question):
     return query({"inputs": f"Based on this content: {pdf_text} The Question is: {question} Provide the answer with max length of about 100 words."})
