@@ -11,8 +11,7 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModel
 import torch
 from rank_bm25 import BM25Okapi
-
-my_token = os.getenv('my_repo_token')
+\my_token = os.getenv('my_repo_token')
 
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -51,8 +50,10 @@ API_URL_LLMA = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llam
 headers = {"Authorization": f"Bearer {my_token}"}
 
 def query(payload):
-    response = requests.post(API_URL_LLMA, headers=headers, json=payload)
-    return response.json()
+    response = requests.post(API_URL_LLMA, headers=headers, json=payload, stream=True)
+    for chunk in response.iter_content(chunk_size=1024):
+        if chunk:
+            yield chunk.decode()
 
 def answer_question_from_pdf(pdf_text, question):
     return query({"inputs": "Based on this content: " + pdf_text + " The Question is: " + question + " Provide the answer with max length of about 100"})
@@ -77,8 +78,9 @@ if uploaded_file is not None:
     
     if st.button("Get Answer"):
         if question:
-            answer = answer_question_from_pdf(" ".join(combined_results), question)
-            st.write("Answer:", answer)
+            with st.empty():
+                for chunk in answer_question_from_pdf(" ".join(combined_results), question):
+                    st.write(chunk, end="", flush=True)
         else:
             st.write("Please enter a question.")
 else:
