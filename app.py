@@ -11,7 +11,7 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModel
 import torch
 from rank_bm25 import BM25Okapi
-\my_token = os.getenv('my_repo_token')
+my_token = os.getenv('my_repo_token')
 
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
