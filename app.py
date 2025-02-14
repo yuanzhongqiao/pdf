@@ -68,12 +68,14 @@ def query(payload):
 
 def rerank_results(results, question):
     reranker_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    tokenizer = AutoTokenizer.from_pretrained(reranker_model)
     reranker = pipeline("text-classification", model=reranker_model, framework="pt")
     
     scored_results = []
     for doc in results:
         input_text = question + " [SEP] " + doc  # Ensure input is a single string
-        score = reranker([input_text])[0]['score']  # Pipeline auto-tokenizes
+        encoded_input = tokenizer(input_text, max_length=512, truncation=True, return_tensors="pt")
+        score = reranker(tokenizer.decode(encoded_input['input_ids'][0]))[0]['score']  # Properly formatted input
         scored_results.append((doc, score))
     
     scored_results.sort(key=lambda x: x[1], reverse=True)
