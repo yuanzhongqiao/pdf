@@ -54,13 +54,13 @@ headers = {"Authorization": f"Bearer {my_token}"}
 def query(payload):
     response = requests.post(API_URL_LLMA, headers=headers, json=payload, stream=True)
     collected_text = ""
-    for chunk in response.iter_content(chunk_size=1024):
+    for chunk in response.iter_lines():
         if chunk:
             try:
                 chunk_data = json.loads(chunk.decode())
                 if "generated_text" in chunk_data:
-                    collected_text += chunk_data["generated_text"]
-                    yield collected_text
+                    collected_text += chunk_data["generated_text"] + " "
+                    yield collected_text.strip()
             except json.JSONDecodeError:
                 continue
 
