@@ -14,8 +14,21 @@ from rank_bm25 import BM25Okapi
 import json
 import time
 from transformers import pipeline
+from huggingface_hub import snapshot_download
 
 my_token = os.getenv('my_repo_token')
+# Use Mistral API instead of local inference
+API_URL_MISTRAL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct"
+headers = {"Authorization": f"Bearer {my_token}"}
+
+def query_mistral(payload):
+    response = requests.post(API_URL_MISTRAL, headers=headers, json=payload)
+    return response.json()
+
+def generate_response(prompt):
+    payload = {"inputs": prompt, "parameters": {"max_length": 200, "temperature": 0.7}}
+    response = query_mistral(payload)
+    return response[0]['generated_text'] if response else "Error generating response"
 
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -50,22 +63,6 @@ def find_most_relevant_context_bm25(contexts, question):
     top_docs = bm25.get_top_n(tokenized_question, contexts, n=3)
     return top_docs
 
-API_URL_LLMA = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
-headers = {"Authorization": f"Bearer {my_token}"}
-
-def query(payload):
-    response = requests.post(API_URL_LLMA, headers=headers, json=payload, stream=True)
-    collected_text = ""
-    for chunk in response.iter_lines():
-        if chunk:
-            try:
-                chunk_data = json.loads(chunk.decode())
-                if "generated_text" in chunk_data:
-                    collected_text += chunk_data["generated_text"] + " "
-                    yield collected_text.strip()
-            except json.JSONDecodeError:
-                continue
-
 def rerank_results(results, question):
     reranker_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker = pipeline("text-classification", model=reranker_model, framework="pt")
@@ -73,16 +70,14 @@ def rerank_results(results, question):
     scored_results = []
     for doc in results:
         input_text = question + " [SEP] " + doc  # Ensure input is a single string
-        tokenizer = AutoTokenizer.from_pretrained(reranker_model)
-        encoded_input = tokenizer(input_text, max_length=512, truncation=True, return_tensors='pt')
-        score = reranker(tokenizer.decode(encoded_input['input_ids'][0]))[0]['score'] 
+        score = reranker([input_text])[0]['score']  # Pass raw text, pipeline auto-tokenizes
         scored_results.append((doc, score))
     
     scored_results.sort(key=lambda x: x[1], reverse=True)
     return [doc for doc, _ in scored_results]
 
 def answer_question_from_pdf(pdf_text, question):
-    return query({"inputs": f"Based on this content: {pdf_text} The Question is: {question} Provide the answer with max length of about 100 words."})
+    return generate_response(f"Based on this content: {pdf_text} The Question is: {question} Provide the answer with max length of about 100 words.")
 
 def extract_text_from_pdf(pdf_file):
     pdf_reader = PdfReader(pdf_file)
@@ -108,9 +103,8 @@ if uploaded_file is not None:
             response_container = st.empty()
             full_response = ""
             with st.spinner("Generating answer..."):
-                for chunk in answer_question_from_pdf(" ".join(reranked_results), question):
-                    full_response = chunk  # Keep updating the full response
-                    response_container.write(full_response)  # Display progressively
+                full_response = answer_question_from_pdf(" ".join(reranked_results), question)
+                response_container.write(full_response)  # Display progressively
         else:
             st.write("Please enter a question.")
 else:
