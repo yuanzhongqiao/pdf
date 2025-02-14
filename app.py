@@ -12,7 +12,7 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 from rank_bm25 import BM25Okapi
 import json
-time
+
 from transformers import pipeline
 
 my_token = os.getenv('my_repo_token')
