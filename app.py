@@ -4,16 +4,16 @@ import pytesseract
 from PIL import Image
 import fitz
 import io
-# from transformers import pipeline
 import requests
 import os
-
 import faiss
 import numpy as np
 from transformers import AutoTokenizer, AutoModel
 import torch
+from rank_bm25 import BM25Okapi
+
 my_token = os.getenv('my_repo_token')
-# Function to get embeddings using a pre-trained model
+
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
@@ -25,91 +25,59 @@ def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     
     return embeddings
 
-# Function to find the most relevant context using FAISS
-def find_most_relevant_context(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
-    # Get embeddings for contexts and question
+def find_most_relevant_context_faiss(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     all_texts = [question] + contexts
     embeddings = get_embeddings(all_texts, model_name=model_name)
     
-    # Separate the question embedding and context embeddings
     question_embedding = embeddings[0]
     context_embeddings = embeddings[1:]
     
-    # Create a FAISS index and add context embeddings
     dimension = context_embeddings.shape[1]
     index = faiss.IndexFlatL2(dimension)
     index.add(context_embeddings)
     
-    # Search for the nearest neighbor to the question embedding
-    _, indices = index.search(question_embedding.reshape(1, -1), 1)
+    _, indices = index.search(question_embedding.reshape(1, -1), 3)  # Retrieve top-3
     
-    # Get the most relevant context
-    most_relevant_index = indices[0][0]
-    return contexts[most_relevant_index]
+    return [contexts[idx] for idx in indices[0]]
 
+def find_most_relevant_context_bm25(contexts, question):
+    tokenized_corpus = [doc.split() for doc in contexts]
+    bm25 = BM25Okapi(tokenized_corpus)
+    tokenized_question = question.split()
+    top_docs = bm25.get_top_n(tokenized_question, contexts, n=3)
+    return top_docs
 
-
-
-
-
-
-
-
-
-API_URL = "https://api-inference.huggingface.co/models/google/gemma-7b"
-API_URL_2 = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-v0.1"
 API_URL_LLMA = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3-8B-Instruct"
 headers = {"Authorization": f"Bearer {my_token}"}
-# pipe = pipeline("text-generation", model="mistralai/Mixtral-8x7B-v0.1", token = my_token)
 
 def query(payload):
-	response = requests.post(API_URL_LLMA, headers=headers, json=payload)
-    
-	return response.json()
-    # return pipe(payload)
-	
+    response = requests.post(API_URL_LLMA, headers=headers, json=payload)
+    return response.json()
 
-
-
-# Mock function for answering questions from the PDF
-# Replace this with your actual backend function
 def answer_question_from_pdf(pdf_text, question):
-    # This function should return the answer to the question based on the PDF content
-    # Here we just return a mock response
- 
-    answer = query(   {"inputs": "Based on this content: " + pdf_text+" The Question is: "+ question + " Provide the answer with max lenghth of about 1500",})
-    answer = answer[0]["generated_text"]
-    answer = answer[answer.find("Answer")+6:]
-    return answer
-# Function to extract text from PDF
+    return query({"inputs": "Based on this content: " + pdf_text + " The Question is: " + question + " Provide the answer with max length of about 100"})
+
 def extract_text_from_pdf(pdf_file):
     pdf_reader = PdfReader(pdf_file)
-    pdf_text = ""
-    pdf_arr = []
-    for page_num in range(len(pdf_reader.pages)):
-        pdf_text = pdf_reader.pages[page_num].extract_text()
-        pdf_arr.append(pdf_text)
+    pdf_arr = [pdf_reader.pages[page_num].extract_text() for page_num in range(len(pdf_reader.pages))]
     return pdf_arr
-# Streamlit app
+
 st.title("PDF Explorer")
 
-# File uploader
 uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
 
 if uploaded_file is not None:
-    # Extract text from uploaded PDF
     pdf_arr = extract_text_from_pdf(uploaded_file)
-    
     st.write("PDF Uploaded Successfully.")
     
-    # Text area for entering a question
     question = st.text_input("Ask a question about the PDF")
-    pdf_text = find_most_relevant_context(pdf_arr,question)
+    faiss_results = find_most_relevant_context_faiss(pdf_arr, question)
+    bm25_results = find_most_relevant_context_bm25(pdf_arr, question)
+    combined_results = list(set(faiss_results + bm25_results))  # Merge FAISS & BM25 results
     
     if st.button("Get Answer"):
         if question:
-            # Get the answer from the backend
-            answer = answer_question_from_pdf(pdf_text, question)
+            answer = answer_question_from_pdf(" ".join(combined_results), question)
             st.write("Answer:", answer)
         else:
             st.write("Please enter a question.")
