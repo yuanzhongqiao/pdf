@@ -12,6 +12,8 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 from rank_bm25 import BM25Okapi
 import json
+time
+from transformers import pipeline
 
 my_token = os.getenv('my_repo_token')
 
@@ -64,6 +66,12 @@ def query(payload):
             except json.JSONDecodeError:
                 continue
 
+def rerank_results(results, question):
+    reranker = pipeline("text-classification", model="cross-encoder/ms-marco-MiniLM-L-6-v2")
+    scored_results = [(doc, reranker(question + " [SEP] " + doc)[0]['score']) for doc in results]
+    scored_results.sort(key=lambda x: x[1], reverse=True)
+    return [doc for doc, _ in scored_results]
+
 def answer_question_from_pdf(pdf_text, question):
     return query({"inputs": f"Based on this content: {pdf_text} The Question is: {question} Provide the answer with max length of about 100 words."})
 
@@ -84,14 +92,16 @@ if uploaded_file is not None:
     faiss_results = find_most_relevant_context_faiss(pdf_arr, question)
     bm25_results = find_most_relevant_context_bm25(pdf_arr, question)
     combined_results = list(set(faiss_results + bm25_results))  # Merge FAISS & BM25 results
+    reranked_results = rerank_results(combined_results, question)  # Apply reranking
     
     if st.button("Get Answer"):
         if question:
             response_container = st.empty()
             full_response = ""
-            for chunk in answer_question_from_pdf(" ".join(combined_results), question):
-                full_response = chunk  # Keep updating the full response
-                response_container.write(full_response)  # Display progressively
+            with st.spinner("Generating answer..."):
+                for chunk in answer_question_from_pdf(" ".join(reranked_results), question):
+                    full_response = chunk  # Keep updating the full response
+                    response_container.write(full_response)  # Display progressively
         else:
             st.write("Please enter a question.")
 else:
