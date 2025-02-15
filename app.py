@@ -14,7 +14,7 @@ from transformers import pipeline
 
 my_token = os.getenv('my_repo_token')
 # Use Mistral API for serverless architecture
-API_URL_MISTRAL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct"
+API_URL_MISTRAL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
 headers = {"Authorization": f"Bearer {'my_token'}"}
 def query_mistral(payload):
     response = requests.post(API_URL_MISTRAL, headers=headers, json=payload)
