@@ -1,5 +1,4 @@
 
-
 import streamlit as st
 from PyPDF2 import PdfReader
 import requests
@@ -19,12 +18,17 @@ headers = {"Authorization": f"Bearer {'my_token'}"}
 
 def query_mistral(payload):
     response = requests.post(API_URL_MISTRAL, headers=headers, json=payload)
-    return response.json()
+    try:
+        response_json = response.json()
+        if isinstance(response_json, list) and response_json:
+            return response_json[0].get('generated_text', "Error: No generated text")
+        return "Error: Invalid response format"
+    except json.JSONDecodeError:
+        return "Error: Failed to parse response"
 
 def generate_response(prompt):
     payload = {"inputs": prompt, "parameters": {"max_length": 200, "temperature": 0.7}}
-    response = query_mistral(payload)
-    return response[0]['generated_text'] if response else "Error generating response"
+    return query_mistral(payload)
 
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -48,15 +52,15 @@ def find_most_relevant_context_faiss(contexts, question, model_name='sentence-tr
     index = faiss.IndexFlatL2(dimension)
     index.add(context_embeddings)
     
-    _, indices = index.search(question_embedding.reshape(1, -1), 3)  # Retrieve top-3
+    _, indices = index.search(question_embedding.reshape(1, -1), min(3, len(context_embeddings)))  # Retrieve top-3
     
-    return [contexts[idx] for idx in indices[0]]
+    return [contexts[idx] for idx in indices[0] if idx < len(contexts)]
 
 def find_most_relevant_context_bm25(contexts, question):
     tokenized_corpus = [doc.split() for doc in contexts]
     bm25 = BM25Okapi(tokenized_corpus)
     tokenized_question = question.split()
-    top_docs = bm25.get_top_n(tokenized_question, contexts, n=3)
+    top_docs = bm25.get_top_n(tokenized_question, contexts, n=min(3, len(contexts)))
     return top_docs
 
 def answer_question_from_pdf(pdf_text, question):
@@ -64,8 +68,8 @@ def answer_question_from_pdf(pdf_text, question):
 
 def extract_text_from_pdf(pdf_file):
     pdf_reader = PdfReader(pdf_file)
-    pdf_arr = [pdf_reader.pages[page_num].extract_text() for page_num in range(len(pdf_reader.pages))]
-    return pdf_arr
+    pdf_arr = [pdf_reader.pages[page_num].extract_text() for page_num in range(len(pdf_reader.pages)) if pdf_reader.pages[page_num].extract_text()]
+    return pdf_arr if pdf_arr else ["No text extracted from the PDF"]
 
 # Streamlit chatbot UI
 st.title("PDF Chatbot (Serverless)")
@@ -84,7 +88,7 @@ if uploaded_file is not None:
         faiss_results = find_most_relevant_context_faiss(pdf_arr, question)
         bm25_results = find_most_relevant_context_bm25(pdf_arr, question)
         combined_results = list(set(faiss_results + bm25_results))  # Merge FAISS & BM25 results
-        response = answer_question_from_pdf(" ".join(combined_results), question)
+        response = answer_question_from_pdf(" ".join(combined_results), question) if combined_results else "No relevant context found."
         
         st.session_state.chat_history.append((question, response))
     
@@ -93,4 +97,3 @@ if uploaded_file is not None:
         st.write(f"**Bot:** {r}")
 else:
     st.write("Please upload a PDF file to start the chat.")
-
