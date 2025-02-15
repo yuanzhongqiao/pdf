@@ -1,9 +1,7 @@
+
+
 import streamlit as st
 from PyPDF2 import PdfReader
-import pytesseract
-from PIL import Image
-import fitz
-import io
 import requests
 import os
 import faiss
@@ -14,12 +12,10 @@ from rank_bm25 import BM25Okapi
 import json
 import time
 from transformers import pipeline
-from huggingface_hub import snapshot_download
-
 my_token = os.getenv('my_repo_token')
-# Use Mistral API instead of local inference
+# Use Mistral API for serverless architecture
 API_URL_MISTRAL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct"
-headers = {"Authorization": f"Bearer {my_token}"}
+headers = {"Authorization": f"Bearer {'my_token'}"}
 
 def query_mistral(payload):
     response = requests.post(API_URL_MISTRAL, headers=headers, json=payload)
@@ -63,19 +59,6 @@ def find_most_relevant_context_bm25(contexts, question):
     top_docs = bm25.get_top_n(tokenized_question, contexts, n=3)
     return top_docs
 
-def rerank_results(results, question):
-    reranker_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    reranker = pipeline("text-classification", model=reranker_model, framework="pt")
-    
-    scored_results = []
-    for doc in results:
-        input_text = question + " [SEP] " + doc  # Ensure input is a single string
-        score = reranker([input_text])[0]['score']  # Pass raw text, pipeline auto-tokenizes
-        scored_results.append((doc, score))
-    
-    scored_results.sort(key=lambda x: x[1], reverse=True)
-    return [doc for doc, _ in scored_results]
-
 def answer_question_from_pdf(pdf_text, question):
     return generate_response(f"Based on this content: {pdf_text} The Question is: {question} Provide the answer with max length of about 100 words.")
 
@@ -84,28 +67,30 @@ def extract_text_from_pdf(pdf_file):
     pdf_arr = [pdf_reader.pages[page_num].extract_text() for page_num in range(len(pdf_reader.pages))]
     return pdf_arr
 
-st.title("PDF Explorer")
+# Streamlit chatbot UI
+st.title("PDF Chatbot (Serverless)")
 
 uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
 
 if uploaded_file is not None:
     pdf_arr = extract_text_from_pdf(uploaded_file)
-    st.write("PDF Uploaded Successfully.")
+    st.write("PDF Uploaded Successfully. Start chatting!")
+    
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
     
     question = st.text_input("Ask a question about the PDF")
-    faiss_results = find_most_relevant_context_faiss(pdf_arr, question)
-    bm25_results = find_most_relevant_context_bm25(pdf_arr, question)
-    combined_results = list(set(faiss_results + bm25_results))  # Merge FAISS & BM25 results
-    reranked_results = rerank_results(combined_results, question)  # Apply reranking
+    if st.button("Send") and question:
+        faiss_results = find_most_relevant_context_faiss(pdf_arr, question)
+        bm25_results = find_most_relevant_context_bm25(pdf_arr, question)
+        combined_results = list(set(faiss_results + bm25_results))  # Merge FAISS & BM25 results
+        response = answer_question_from_pdf(" ".join(combined_results), question)
+        
+        st.session_state.chat_history.append((question, response))
     
-    if st.button("Get Answer"):
-        if question:
-            response_container = st.empty()
-            full_response = ""
-            with st.spinner("Generating answer..."):
-                full_response = answer_question_from_pdf(" ".join(reranked_results), question)
-                response_container.write(full_response)  # Display progressively
-        else:
-            st.write("Please enter a question.")
+    for q, r in st.session_state.chat_history:
+        st.write(f"**You:** {q}")
+        st.write(f"**Bot:** {r}")
 else:
-    st.write("Please upload a PDF file.")
+    st.write("Please upload a PDF file to start the chat.")
+
