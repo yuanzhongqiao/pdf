@@ -66,8 +66,9 @@ def find_most_relevant_context_bm25(contexts, question):
     return top_docs
 
 def answer_question_from_pdf(pdf_text, question):
-    return generate_response(f"Based on this content: {pdf_text} The Question is: {question} Provide the answer with max length of about 100 words.")
-
+    response = generate_response(f"Based on this content: {pdf_text} The Question is: {question} Provide the answer with max length of about 100 words.")
+    cleaned_response = response.replace(f"Based on this content: {pdf_text} The Question is: {question} Provide the answer with max length of about 100 words.", "").strip()
+    return cleaned_response
 def extract_text_from_pdf(pdf_file):
     pdf_reader = PdfReader(pdf_file)
     pdf_arr = [pdf_reader.pages[page_num].extract_text() for page_num in range(len(pdf_reader.pages)) if pdf_reader.pages[page_num].extract_text()]
@@ -91,6 +92,7 @@ if uploaded_file is not None:
         bm25_results = find_most_relevant_context_bm25(pdf_arr, question)
         combined_results = list(set(faiss_results + bm25_results))  # Merge FAISS & BM25 results
         response = answer_question_from_pdf(" ".join(combined_results), question) if combined_results else "No relevant context found."
+
         
         st.session_state.chat_history.append((question, response))
     
