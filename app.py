@@ -32,21 +32,28 @@ def generate_response(prompt):
     return query_mistral(payload)
 
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
-    """Compute dense vector embeddings with proper text format handling."""
+    """Compute embeddings ensuring input format is correct."""
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
 
-    # Ensure input is a list of non-empty strings
-    texts = [str(text) if text else " " for text in texts]  
+    # Ensure all elements in texts are strings
+    if isinstance(texts, str):
+        texts = [texts]  # Convert single string to list
+    elif isinstance(texts, list):
+        texts = [str(text) if text else " " for text in texts]  # Convert non-string elements
+    else:
+        raise TypeError("Input to tokenizer must be a string or a list of strings")
 
-    # Tokenize correctly
+    # Tokenize and encode
     inputs = tokenizer(texts, padding=True, truncation=True, return_tensors='pt')
 
+    # Generate embeddings
     with torch.no_grad():
         outputs = model(**inputs)
 
     embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
     return embeddings
+
 
 def find_most_relevant_context_faiss(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     """Find most relevant context using FAISS for dense retrieval."""
