@@ -50,27 +50,40 @@ def generate_response(context, question):
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
-    
+
+    # Ensure all texts are strings and not None
+    texts = [str(text) for text in texts if text]
+
+    # Tokenize input properly
     inputs = tokenizer(texts, return_tensors='pt', padding=True, truncation=True)
+
     with torch.no_grad():
         outputs = model(**inputs)
-    embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
     
+    embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
     return embeddings
 
+
 # 🔹 FAISS Search (Semantic Search)
-def find_most_relevant_context_faiss(contexts, question):
+def find_most_relevant_context_faiss(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     all_texts = [question] + contexts
-    embeddings = get_embeddings(all_texts)
-    
+
+    # Ensure all_texts is a list of non-empty strings
+    all_texts = [str(text) for text in all_texts if text and isinstance(text, str)]
+
+    if not all_texts:
+        return []
+
+    embeddings = get_embeddings(all_texts, model_name=model_name)
+
     question_embedding = embeddings[0]
     context_embeddings = embeddings[1:]
-    
+
     dimension = context_embeddings.shape[1]
     index = faiss.IndexFlatL2(dimension)
     index.add(context_embeddings)
-    
-    _, indices = index.search(question_embedding.reshape(1, -1), min(3, len(context_embeddings)))
+
+    _, indices = index.search(question_embedding.reshape(1, -1), min(3, len(context_embeddings)))  # Retrieve top-3
     return [contexts[idx] for idx in indices[0] if idx < len(contexts)]
 
 # 🔹 BM25 Search (Keyword-Based)
