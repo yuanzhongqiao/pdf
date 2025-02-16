@@ -1,6 +1,3 @@
-
-
-
 import streamlit as st
 from PyPDF2 import PdfReader
 import requests
@@ -11,15 +8,17 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 from rank_bm25 import BM25Okapi
 import json
-import time
 from transformers import pipeline
+from colbert.infra import ColBERTConfig, Run
+from colbert import Searcher
 
-my_token = os.getenv('my_repo_token')
 # Use Mistral API for serverless architecture
+my_token = os.getenv('my_repo_token')
 API_URL_MISTRAL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
 headers = {"Authorization": f"Bearer {my_token}"}
 
 def query_mistral(payload):
+    """Send request to Mistral API and return processed response."""
     response = requests.post(API_URL_MISTRAL, headers=headers, json=payload)
     try:
         response_json = response.json()
@@ -32,11 +31,13 @@ def query_mistral(payload):
         return "Error: Failed to parse response"
 
 def generate_response(prompt):
+    """Generate an AI response with hallucination control."""
     prompt += "\nIf the answer is not in the provided text, say 'I don't know'."
     payload = {"inputs": prompt, "parameters": {"max_length": 200, "temperature": 0.3}}
     return query_mistral(payload)
 
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
+    """Compute dense vector embeddings for input texts."""
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
     inputs = tokenizer(texts, return_tensors='pt', padding=True, truncation=True)
@@ -46,6 +47,7 @@ def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     return embeddings
 
 def find_most_relevant_context_faiss(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
+    """Find most relevant context using FAISS for dense retrieval."""
     all_texts = [question] + contexts
     embeddings = get_embeddings(all_texts, model_name=model_name)
     question_embedding = embeddings[0]
@@ -57,13 +59,22 @@ def find_most_relevant_context_faiss(contexts, question, model_name='sentence-tr
     return [contexts[idx] for idx in indices[0] if idx < len(contexts)]
 
 def find_most_relevant_context_bm25(contexts, question):
+    """Find relevant context using BM25 for sparse retrieval."""
     tokenized_corpus = [doc.split() for doc in contexts]
     bm25 = BM25Okapi(tokenized_corpus)
     tokenized_question = question.split()
     top_docs = bm25.get_top_n(tokenized_question, contexts, n=min(3, len(contexts)))
     return top_docs
 
+def find_most_relevant_context_colbert(contexts, question):
+    """Use ColBERT to find the most relevant passages."""
+    config = ColBERTConfig(nbits=2)
+    searcher = Searcher(index="colbert_index", config=config)
+    ranked_results = searcher.search(question, k=min(3, len(contexts)))
+    return [contexts[idx] for idx in ranked_results]
+
 def rerank_results(contexts, question):
+    """Rerank the retrieved results based on relevance."""
     scores = []
     for context in contexts:
         response = generate_response(f"Does this text answer the question: '{question}'? Text: {context}")
@@ -75,6 +86,7 @@ def rerank_results(contexts, question):
     return ranked_contexts if ranked_contexts else ["I don't know."]
 
 def is_response_confident(response):
+    """Check if the AI response shows low confidence indicators."""
     low_confidence_phrases = [
         "i'm not sure", "i think", "possibly", "maybe", "it seems", "likely",
         "i guess", "i assume", "it's possible", "as far as i know"
@@ -82,6 +94,7 @@ def is_response_confident(response):
     return not any(phrase in response.lower() for phrase in low_confidence_phrases)
 
 def validate_response(prompt):
+    """Generate two responses and check for consistency."""
     response1 = generate_response(prompt)
     response2 = generate_response(prompt)
     if response1.strip().lower() != response2.strip().lower():
@@ -89,6 +102,7 @@ def validate_response(prompt):
     return response1
 
 def answer_question_from_pdf(pdf_text, question):
+    """Answer the question using relevant PDF context while preventing hallucination."""
     if not pdf_text.strip():
         return "I could not find relevant information in the document."
     prompt = f"{pdf_text} The Question is: {question} Provide the answer with max length of about 100 words."
@@ -98,20 +112,23 @@ def answer_question_from_pdf(pdf_text, question):
     return response
 
 def extract_text_from_pdf(pdf_file):
+    """Extract text from a PDF file."""
     pdf_reader = PdfReader(pdf_file)
     pdf_arr = [pdf_reader.pages[page_num].extract_text() for page_num in range(len(pdf_reader.pages)) if pdf_reader.pages[page_num].extract_text()]
     return pdf_arr if pdf_arr else ["No text extracted from the PDF"]
 
 def hybrid_search(contexts, question):
+    """Combine FAISS, BM25, and ColBERT for hybrid retrieval."""
     faiss_results = find_most_relevant_context_faiss(contexts, question)
     bm25_results = find_most_relevant_context_bm25(contexts, question)
-    combined_results = list(set(faiss_results + bm25_results))
+    colbert_results = find_most_relevant_context_colbert(contexts, question)
+    combined_results = list(set(faiss_results + bm25_results + colbert_results))
     if not combined_results:
         return ["I don't know."]
     return rerank_results(combined_results, question)
 
 # Streamlit chatbot UI
-st.title("PDF Chatbot (Serverless)")
+st.title("PDF Chatbot (Serverless with Hybrid Retrieval)")
 
 uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
 
