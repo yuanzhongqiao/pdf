@@ -9,3 +9,4 @@ torch
 faiss-cpu
 numpy
 rank-bm25
+sentence-transformers
