@@ -8,9 +8,6 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 from rank_bm25 import BM25Okapi
 import json
-from transformers import pipeline
-from colbert.infra import ColBERTConfig, Run
-from colbert import Searcher
 
 # Use Mistral API for serverless architecture
 my_token = os.getenv('my_repo_token')
@@ -40,9 +37,15 @@ def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     """Compute dense vector embeddings for input texts."""
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
-    inputs = tokenizer(texts, return_tensors='pt', padding=True, truncation=True)
+
+    if isinstance(texts, str):  # Ensure texts are a list
+        texts = [texts]
+
+    inputs = tokenizer(texts, padding=True, truncation=True, return_tensors='pt')
+    
     with torch.no_grad():
         outputs = model(**inputs)
+
     embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
     return embeddings
 
@@ -50,11 +53,17 @@ def find_most_relevant_context_faiss(contexts, question, model_name='sentence-tr
     """Find most relevant context using FAISS for dense retrieval."""
     all_texts = [question] + contexts
     embeddings = get_embeddings(all_texts, model_name=model_name)
+    
     question_embedding = embeddings[0]
     context_embeddings = embeddings[1:]
+
+    if context_embeddings.shape[0] == 0:
+        return []
+
     dimension = context_embeddings.shape[1]
     index = faiss.IndexFlatL2(dimension)
     index.add(context_embeddings)
+
     _, indices = index.search(question_embedding.reshape(1, -1), min(3, len(context_embeddings)))
     return [contexts[idx] for idx in indices[0] if idx < len(contexts)]
 
@@ -65,13 +74,6 @@ def find_most_relevant_context_bm25(contexts, question):
     tokenized_question = question.split()
     top_docs = bm25.get_top_n(tokenized_question, contexts, n=min(3, len(contexts)))
     return top_docs
-
-def find_most_relevant_context_colbert(contexts, question):
-    """Use ColBERT to find the most relevant passages."""
-    config = ColBERTConfig(nbits=2)
-    searcher = Searcher(index="colbert_index", config=config)
-    ranked_results = searcher.search(question, k=min(3, len(contexts)))
-    return [contexts[idx] for idx in ranked_results]
 
 def rerank_results(contexts, question):
     """Rerank the retrieved results based on relevance."""
@@ -105,10 +107,13 @@ def answer_question_from_pdf(pdf_text, question):
     """Answer the question using relevant PDF context while preventing hallucination."""
     if not pdf_text.strip():
         return "I could not find relevant information in the document."
+    
     prompt = f"{pdf_text} The Question is: {question} Provide the answer with max length of about 100 words."
     response = validate_response(prompt)
+
     if not is_response_confident(response):
         return "I'm not sure about this. Please refer to the original document."
+
     return response
 
 def extract_text_from_pdf(pdf_file):
@@ -118,13 +123,14 @@ def extract_text_from_pdf(pdf_file):
     return pdf_arr if pdf_arr else ["No text extracted from the PDF"]
 
 def hybrid_search(contexts, question):
-    """Combine FAISS, BM25, and ColBERT for hybrid retrieval."""
+    """Combine FAISS and BM25 for hybrid retrieval."""
     faiss_results = find_most_relevant_context_faiss(contexts, question)
     bm25_results = find_most_relevant_context_bm25(contexts, question)
-    colbert_results = find_most_relevant_context_colbert(contexts, question)
-    combined_results = list(set(faiss_results + bm25_results + colbert_results))
+    combined_results = list(set(faiss_results + bm25_results))
+    
     if not combined_results:
         return ["I don't know."]
+    
     return rerank_results(combined_results, question)
 
 # Streamlit chatbot UI
@@ -135,13 +141,17 @@ uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
 if uploaded_file is not None:
     pdf_arr = extract_text_from_pdf(uploaded_file)
     st.write("PDF Uploaded Successfully. Start chatting!")
+
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
+    
     question = st.text_input("Ask a question about the PDF")
+    
     if st.button("Send") and question:
         combined_results = hybrid_search(pdf_arr, question)
         response = answer_question_from_pdf(" ".join(combined_results), question) if combined_results else "No relevant context found."
         st.session_state.chat_history.append((question, response))
+    
     for q, r in st.session_state.chat_history:
         st.write(f"**You:** {q}")
         st.write(f"**Bot:** {r}")
