@@ -6,55 +6,41 @@ import requests
 import os
 import faiss
 import numpy as np
+from transformers import AutoTokenizer, AutoModel
 import torch
-from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification
 from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer, util
-
+import json
+from transformers import DPRContextEncoder, DPRContextEncoderTokenizerFast, DPRQuestionEncoder, DPRQuestionEncoderTokenizerFast
 
 my_token = os.getenv('my_repo_token')
 # Use Mistral API for serverless architecture
 API_URL_MISTRAL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
 headers = {"Authorization": f"Bearer {my_token}"}
 
-# Initialize Retrieval Models
-bm25_model = None
-dense_retrieval_model = SentenceTransformer("sentence-transformers/msmarco-MiniLM-L6-cos-v5")
-reranker_tokenizer = AutoTokenizer.from_pretrained("cross-encoder/ms-marco-MiniLM-L-6-v2")
-reranker_model = AutoModelForSequenceClassification.from_pretrained("cross-encoder/ms-marco-MiniLM-L-6-v2")
-
-# 🔹 Query Mistral API for Response Generation
-def query_mistral(prompt):
-    payload = {"inputs": prompt, "parameters": {"max_length": 200, "temperature": 0.7}}
+# Query Mistral API
+def query_mistral(payload):
     response = requests.post(API_URL_MISTRAL, headers=headers, json=payload)
     try:
         response_json = response.json()
         if isinstance(response_json, list) and response_json:
-            generated_text = response_json[0].get('generated_text', "Error: No generated text")
-            return generated_text.replace("Based on this content:", "").strip()
+            return response_json[0].get('generated_text', "Error: No generated text").replace("Based on this content:", "").strip()
         elif isinstance(response_json, dict) and "error" in response_json:
             return f"Error: {response_json['error']}"
         return "Error: Invalid response format"
-    except:
+    except json.JSONDecodeError:
         return "Error: Failed to parse response"
 
-# 🔹 Generate a Response with Safe Prompting
-def generate_response(context, question):
-    return query_mistral(
-        f"""You are an AI assistant answering questions based on a document.
-        Use the provided document **only**. If the document does not contain relevant information, say 'I don’t know.'
-        \n\n Document: {context} \n\nQuestion: {question}"""
-    )
+# Generate response from Mistral
+def generate_response(prompt):
+    payload = {"inputs": prompt, "parameters": {"max_length": 200, "temperature": 0.7}}
+    return query_mistral(payload)
 
-# 🔹 Get Dense Embeddings for FAISS Search
+# Dense Retrieval - FAISS Embeddings
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
-
-    # Ensure all texts are strings and not None
-    texts = [str(text) for text in texts if text]
-
-    # Tokenize input properly
+    
+    texts = [str(text) for text in texts if text]  # Ensure valid text input
     inputs = tokenizer(texts, return_tensors='pt', padding=True, truncation=True)
 
     with torch.no_grad():
@@ -63,19 +49,22 @@ def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
     return embeddings
 
+# Sparse Retrieval - BM25
+def find_most_relevant_context_bm25(contexts, question):
+    tokenized_corpus = [doc.split() for doc in contexts]
+    bm25 = BM25Okapi(tokenized_corpus)
+    tokenized_question = question.split()
+    return bm25.get_top_n(tokenized_question, contexts, n=min(3, len(contexts)))
 
-# 🔹 FAISS Search (Semantic Search)
+# Dense Retrieval - FAISS
 def find_most_relevant_context_faiss(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     all_texts = [question] + contexts
-
-    # Ensure all_texts is a list of non-empty strings
-    all_texts = [str(text) for text in all_texts if text and isinstance(text, str)]
-
+    all_texts = [str(text) for text in all_texts if text]  # Ensure valid input
+    
     if not all_texts:
         return []
 
     embeddings = get_embeddings(all_texts, model_name=model_name)
-
     question_embedding = embeddings[0]
     context_embeddings = embeddings[1:]
 
@@ -83,87 +72,82 @@ def find_most_relevant_context_faiss(contexts, question, model_name='sentence-tr
     index = faiss.IndexFlatL2(dimension)
     index.add(context_embeddings)
 
-    _, indices = index.search(question_embedding.reshape(1, -1), min(3, len(context_embeddings)))  # Retrieve top-3
+    _, indices = index.search(question_embedding.reshape(1, -1), min(3, len(context_embeddings)))
     return [contexts[idx] for idx in indices[0] if idx < len(contexts)]
 
-# 🔹 BM25 Search (Keyword-Based)
-def find_most_relevant_context_bm25(contexts, question):
-    global bm25_model
-    tokenized_corpus = [doc.split() for doc in contexts]
-    
-    if bm25_model is None:
-        bm25_model = BM25Okapi(tokenized_corpus)
-    
-    tokenized_question = question.split()
-    top_docs = bm25_model.get_top_n(tokenized_question, contexts, n=min(3, len(contexts)))
-    return top_docs
+# **ColBERT Retrieval - Contextualized Word-Level Matching**
+def find_most_relevant_context_colbert(contexts, question):
+    # Load DPR question and context encoders (ColBERT-like approach)
+    question_encoder = DPRQuestionEncoder.from_pretrained("facebook/dpr-question_encoder-single-nq-base")
+    context_encoder = DPRContextEncoder.from_pretrained("facebook/dpr-ctx_encoder-single-nq-base")
+    question_tokenizer = DPRQuestionEncoderTokenizerFast.from_pretrained("facebook/dpr-question_encoder-single-nq-base")
+    context_tokenizer = DPRContextEncoderTokenizerFast.from_pretrained("facebook/dpr-ctx_encoder-single-nq-base")
 
-# 🔹 Rerank Retrieved Passages with Cross-Encoder
-def rerank(query, passages):
-    scores = []
-    for passage in passages:
-        inputs = reranker_tokenizer(query, passage, return_tensors="pt", truncation=True, padding=True)
+    # Encode question
+    question_inputs = question_tokenizer(question, return_tensors="pt", truncation=True, padding=True)
+    with torch.no_grad():
+        question_embedding = question_encoder(**question_inputs).pooler_output
+
+    # Encode each context
+    context_embeddings = []
+    for context in contexts:
+        context_inputs = context_tokenizer(context, return_tensors="pt", truncation=True, padding=True)
         with torch.no_grad():
-            score = reranker_model(**inputs).logits.squeeze().item()
-        scores.append((passage, score))
-    return sorted(scores, key=lambda x: x[1], reverse=True)[0][0]
-
-# 🔹 Verify Answer with a Second Model
-def verify_answer(question, generated_answer):
-    verifier_prompt = f"""Verify if the following answer is grounded in the given question.
-    If it includes hallucinated details, respond with 'Incorrect'. Otherwise, say 'Correct'.
+            context_embeddings.append(context_encoder(**context_inputs).pooler_output)
     
-    Question: {question}
-    Answer: {generated_answer}"""
-    
-    verification_response = query_mistral(verifier_prompt)
-    return verification_response.lower() == "correct"
+    context_embeddings = torch.stack(context_embeddings)
 
-# 🔹 Extract Text from PDF
+    # Compute similarity scores
+    scores = torch.matmul(question_embedding, context_embeddings.T).squeeze(0)
+    top_k_indices = scores.topk(min(3, len(contexts))).indices.tolist()
+
+    return [contexts[idx] for idx in top_k_indices]
+
+# Hybrid Retrieval - FAISS + BM25 + ColBERT
+def hybrid_search(contexts, question):
+    faiss_results = find_most_relevant_context_faiss(contexts, question)
+    bm25_results = find_most_relevant_context_bm25(contexts, question)
+    colbert_results = find_most_relevant_context_colbert(contexts, question)
+    
+    # Combine results, ensuring uniqueness
+    combined_results = list(set(faiss_results + bm25_results + colbert_results))
+    return combined_results if combined_results else ["No relevant context found."]
+
+# Generate answer based on retrieved context
+def answer_question_from_pdf(pdf_text, question):
+    return generate_response(f"{pdf_text} The Question is: {question} Provide the answer with max length of about 100 words.")
+
+# Extract text from PDF
 def extract_text_from_pdf(pdf_file):
     pdf_reader = PdfReader(pdf_file)
     pdf_arr = [pdf_reader.pages[page_num].extract_text() for page_num in range(len(pdf_reader.pages)) if pdf_reader.pages[page_num].extract_text()]
     return pdf_arr if pdf_arr else ["No text extracted from the PDF"]
 
-# 🔹 Answer Question with RAG and Hallucination Prevention
-def answer_question_from_pdf(pdf_text, question):
-    faiss_results = find_most_relevant_context_faiss(pdf_text, question)
-    bm25_results = find_most_relevant_context_bm25(pdf_text, question)
-    combined_results = list(set(faiss_results + bm25_results))
-    
-    if not combined_results:
-        return "I don’t know. The document does not contain relevant information."
-
-    top_context = rerank(question, combined_results)
-    response = generate_response(top_context, question)
-
-    # Apply verification
-    if not verify_answer(question, response):
-        return "I'm not confident in my answer. Please check the document directly."
-
-    return response
-
-# 🔹 Streamlit UI
-st.title("Hallucination-Free PDF Chatbot")
+# Streamlit chatbot UI
+st.title("PDF Chatbot (Serverless) - Hybrid RAG (FAISS + BM25 + ColBERT)")
 
 uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
 
 if uploaded_file is not None:
     pdf_arr = extract_text_from_pdf(uploaded_file)
-    st.write("PDF Uploaded Successfully. Start chatting!")
-    
+    st.write("📄 **PDF Uploaded Successfully. Start chatting!**")
+
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
     
     question = st.text_input("Ask a question about the PDF")
     if st.button("Send") and question:
-        response = answer_question_from_pdf(pdf_arr, question)
+        combined_results = hybrid_search(pdf_arr, question)  # Hybrid Retrieval
+        
+        # Generate response using the best retrieved contexts
+        response = answer_question_from_pdf(" ".join(combined_results), question)
+
+        # Store the conversation history
         st.session_state.chat_history.append((question, response))
-    
+
+    # Display chat history
     for q, r in st.session_state.chat_history:
         st.write(f"**You:** {q}")
         st.write(f"**Bot:** {r}")
 else:
-    st.write("Please upload a PDF file to start the chat.")
-    
-
+    st.write("📥 **Please upload a PDF file to start the chat.**")
