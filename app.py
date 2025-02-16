@@ -32,17 +32,21 @@ def generate_response(prompt):
     return query_mistral(payload)
 
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
-    """Compute embeddings ensuring input format is correct."""
+    """Generate embeddings ensuring input is properly formatted."""
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
 
-    # Ensure all elements in texts are strings
+    # Ensure all elements in texts are strings and non-empty
     if isinstance(texts, str):
         texts = [texts]  # Convert single string to list
     elif isinstance(texts, list):
-        texts = [str(text) if text else " " for text in texts]  # Convert non-string elements
+        texts = [str(text) if text else "Empty" for text in texts]  # Convert non-string elements
     else:
         raise TypeError("Input to tokenizer must be a string or a list of strings")
+
+    # Ensure there is at least one valid input
+    if not texts:
+        raise ValueError("Tokenization input cannot be an empty list")
 
     # Tokenize and encode
     inputs = tokenizer(texts, padding=True, truncation=True, return_tensors='pt')
@@ -55,16 +59,20 @@ def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     return embeddings
 
 
-def find_most_relevant_context_faiss(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
-    """Find most relevant context using FAISS for dense retrieval."""
-    all_texts = [question] + contexts
-    embeddings = get_embeddings(all_texts, model_name=model_name)
 
-    if len(embeddings) < 2:
-        return []
+def find_most_relevant_context_faiss(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
+    """Find relevant contexts using FAISS with validated inputs."""
+    if not contexts or not question:
+        return ["No relevant context found."]
+
+    all_texts = [question] + contexts
+    embeddings = get_embeddings(all_texts, model_name=model_name)  # FIX: Ensure valid input
 
     question_embedding = embeddings[0]
     context_embeddings = embeddings[1:]
+
+    if context_embeddings.shape[0] == 0:
+        return ["No relevant context found."]
 
     dimension = context_embeddings.shape[1]
     index = faiss.IndexFlatL2(dimension)
@@ -72,6 +80,7 @@ def find_most_relevant_context_faiss(contexts, question, model_name='sentence-tr
 
     _, indices = index.search(question_embedding.reshape(1, -1), min(3, len(context_embeddings)))
     return [contexts[idx] for idx in indices[0] if idx < len(contexts)]
+
 
 def find_most_relevant_context_bm25(contexts, question):
     """Find relevant context using BM25 for sparse retrieval."""
