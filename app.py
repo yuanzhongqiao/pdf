@@ -37,10 +37,10 @@ def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
     model = AutoModel.from_pretrained(model_name)
 
     # Ensure input is a list of non-empty strings
-    texts = [str(text) if text else "" for text in texts]  
+    texts = [str(text) if text else " " for text in texts]  
 
     # Tokenize correctly
-    inputs = tokenizer.batch_encode_plus(texts, padding=True, truncation=True, return_tensors='pt')
+    inputs = tokenizer(texts, padding=True, truncation=True, return_tensors='pt')
 
     with torch.no_grad():
         outputs = model(**inputs)
