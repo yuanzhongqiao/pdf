@@ -15,7 +15,6 @@ API_URL_MISTRAL = "https://api-inference.huggingface.co/models/mistralai/Mistral
 headers = {"Authorization": f"Bearer {my_token}"}
 
 def query_mistral(payload):
-    """Send request to Mistral API and return processed response."""
     response = requests.post(API_URL_MISTRAL, headers=headers, json=payload)
     try:
         response_json = response.json()
@@ -28,21 +27,21 @@ def query_mistral(payload):
         return "Error: Failed to parse response"
 
 def generate_response(prompt):
-    """Generate an AI response with hallucination control."""
     prompt += "\nIf the answer is not in the provided text, say 'I don't know'."
     payload = {"inputs": prompt, "parameters": {"max_length": 200, "temperature": 0.3}}
     return query_mistral(payload)
 
 def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
-    """Compute dense vector embeddings for input texts."""
+    """Compute dense vector embeddings with proper text format handling."""
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
 
-    if isinstance(texts, str):  # Ensure texts are a list
-        texts = [texts]
+    # Ensure input is a list of non-empty strings
+    texts = [str(text) if text else "" for text in texts]  
 
-    inputs = tokenizer(texts, padding=True, truncation=True, return_tensors='pt')
-    
+    # Tokenize correctly
+    inputs = tokenizer.batch_encode_plus(texts, padding=True, truncation=True, return_tensors='pt')
+
     with torch.no_grad():
         outputs = model(**inputs)
 
@@ -53,12 +52,12 @@ def find_most_relevant_context_faiss(contexts, question, model_name='sentence-tr
     """Find most relevant context using FAISS for dense retrieval."""
     all_texts = [question] + contexts
     embeddings = get_embeddings(all_texts, model_name=model_name)
-    
+
+    if len(embeddings) < 2:
+        return []
+
     question_embedding = embeddings[0]
     context_embeddings = embeddings[1:]
-
-    if context_embeddings.shape[0] == 0:
-        return []
 
     dimension = context_embeddings.shape[1]
     index = faiss.IndexFlatL2(dimension)
@@ -69,14 +68,14 @@ def find_most_relevant_context_faiss(contexts, question, model_name='sentence-tr
 
 def find_most_relevant_context_bm25(contexts, question):
     """Find relevant context using BM25 for sparse retrieval."""
-    tokenized_corpus = [doc.split() for doc in contexts]
+    tokenized_corpus = [doc.split() for doc in contexts if doc]
     bm25 = BM25Okapi(tokenized_corpus)
     tokenized_question = question.split()
     top_docs = bm25.get_top_n(tokenized_question, contexts, n=min(3, len(contexts)))
     return top_docs
 
 def rerank_results(contexts, question):
-    """Rerank the retrieved results based on relevance."""
+    """Rerank retrieved results based on relevance."""
     scores = []
     for context in contexts:
         response = generate_response(f"Does this text answer the question: '{question}'? Text: {context}")
@@ -88,7 +87,7 @@ def rerank_results(contexts, question):
     return ranked_contexts if ranked_contexts else ["I don't know."]
 
 def is_response_confident(response):
-    """Check if the AI response shows low confidence indicators."""
+    """Check for uncertainty in AI response."""
     low_confidence_phrases = [
         "i'm not sure", "i think", "possibly", "maybe", "it seems", "likely",
         "i guess", "i assume", "it's possible", "as far as i know"
@@ -96,7 +95,7 @@ def is_response_confident(response):
     return not any(phrase in response.lower() for phrase in low_confidence_phrases)
 
 def validate_response(prompt):
-    """Generate two responses and check for consistency."""
+    """Ensure consistent answers by checking multiple responses."""
     response1 = generate_response(prompt)
     response2 = generate_response(prompt)
     if response1.strip().lower() != response2.strip().lower():
@@ -104,7 +103,7 @@ def validate_response(prompt):
     return response1
 
 def answer_question_from_pdf(pdf_text, question):
-    """Answer the question using relevant PDF context while preventing hallucination."""
+    """Answer the question using retrieved PDF context while preventing hallucination."""
     if not pdf_text.strip():
         return "I could not find relevant information in the document."
     
