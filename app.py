@@ -152,4 +152,5 @@ if uploaded_file is not None:
         st.write(f"**Bot:** {r}")
 else:
     st.write("Please upload a PDF file to start the chat.")
+    
 
