@@ -4,16 +4,33 @@ import requests
 import os
 import faiss
 import numpy as np
-from transformers import AutoTokenizer, AutoModel
 import torch
 from rank_bm25 import BM25Okapi
-import json
+from transformers import AutoTokenizer, AutoModel
+from tqdm import tqdm
 
-# Use Mistral API for serverless architecture
+# Hugging Face API settings
 my_token = os.getenv('my_repo_token')
 API_URL_MISTRAL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
 headers = {"Authorization": f"Bearer {my_token}"}
 
+# Model settings
+EMBEDDING_MODEL = "BAAI/bge-large-en"
+RERANKER_MODEL = "BAAI/bge-reranker-large"
+CHUNK_SIZE = 500  # Max 500 tokens per chunk
+TOP_K = 5  # Retrieve top 5 results
+
+# Load models
+tokenizer_emb = AutoTokenizer.from_pretrained(EMBEDDING_MODEL)
+model_emb = AutoModel.from_pretrained(EMBEDDING_MODEL)
+
+tokenizer_rerank = AutoTokenizer.from_pretrained(RERANKER_MODEL)
+model_rerank = AutoModel.from_pretrained(RERANKER_MODEL)
+
+
+# ====== HELPER FUNCTIONS ======
+
+# Query Mistral API (Serverless)
 def query_mistral(payload):
     response = requests.post(API_URL_MISTRAL, headers=headers, json=payload)
     try:
@@ -23,133 +40,99 @@ def query_mistral(payload):
         elif isinstance(response_json, dict) and "error" in response_json:
             return f"Error: {response_json['error']}"
         return "Error: Invalid response format"
-    except json.JSONDecodeError:
+    except Exception:
         return "Error: Failed to parse response"
 
+
+# Generate response from Mistral
 def generate_response(prompt):
-    prompt += "\nIf the answer is not in the provided text, say 'I don't know'."
     payload = {"inputs": prompt, "parameters": {"max_length": 200, "temperature": 0.3}}
     return query_mistral(payload)
 
-def get_embeddings(texts, model_name='sentence-transformers/all-MiniLM-L6-v2'):
-    """Generate embeddings ensuring input is properly formatted."""
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModel.from_pretrained(model_name)
 
-    # Ensure all elements in texts are strings and non-empty
-    if isinstance(texts, str):
-        texts = [texts]  # Convert single string to list
-    elif isinstance(texts, list):
-        texts = [str(text) if text else "Empty" for text in texts]  # Convert non-string elements
-    else:
-        raise TypeError("Input to tokenizer must be a string or a list of strings")
+# Split text into chunks of 500 tokens
+def chunk_text(text, chunk_size=CHUNK_SIZE):
+    tokens = tokenizer_emb.tokenize(text)
+    chunks = [" ".join(tokens[i: i + chunk_size]) for i in range(0, len(tokens), chunk_size)]
+    return chunks
 
-    # Ensure there is at least one valid input
-    if not texts:
-        raise ValueError("Tokenization input cannot be an empty list")
 
-    # Tokenize and encode
-    inputs = tokenizer(texts, padding=True, truncation=True, return_tensors='pt')
-
-    # Generate embeddings
+# Get embeddings for texts
+def get_embeddings(texts, model_name=EMBEDDING_MODEL):
+    inputs = tokenizer_emb(texts, return_tensors='pt', padding=True, truncation=True, max_length=512)
     with torch.no_grad():
-        outputs = model(**inputs)
-
+        outputs = model_emb(**inputs)
     embeddings = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
     return embeddings
 
 
-
-def find_most_relevant_context_faiss(contexts, question, model_name='sentence-transformers/all-MiniLM-L6-v2'):
-    """Find relevant contexts using FAISS with validated inputs."""
-    if not contexts or not question:
-        return ["No relevant context found."]
-
+# Find most relevant context using FAISS
+def find_most_relevant_context_faiss(contexts, question):
     all_texts = [question] + contexts
-    embeddings = get_embeddings(all_texts, model_name=model_name)  # FIX: Ensure valid input
-
+    embeddings = get_embeddings(all_texts)
     question_embedding = embeddings[0]
     context_embeddings = embeddings[1:]
 
-    if context_embeddings.shape[0] == 0:
-        return ["No relevant context found."]
-
+    # FAISS Index
     dimension = context_embeddings.shape[1]
     index = faiss.IndexFlatL2(dimension)
     index.add(context_embeddings)
 
-    _, indices = index.search(question_embedding.reshape(1, -1), min(3, len(context_embeddings)))
+    # Search Top-K
+    _, indices = index.search(question_embedding.reshape(1, -1), TOP_K)
     return [contexts[idx] for idx in indices[0] if idx < len(contexts)]
 
 
+# Find most relevant context using BM25
 def find_most_relevant_context_bm25(contexts, question):
-    """Find relevant context using BM25 for sparse retrieval."""
-    tokenized_corpus = [doc.split() for doc in contexts if doc]
+    tokenized_corpus = [doc.split() for doc in contexts]
     bm25 = BM25Okapi(tokenized_corpus)
     tokenized_question = question.split()
-    top_docs = bm25.get_top_n(tokenized_question, contexts, n=min(3, len(contexts)))
+    top_docs = bm25.get_top_n(tokenized_question, contexts, n=TOP_K)
     return top_docs
 
+
+# Rerank results using a transformer-based reranker
 def rerank_results(contexts, question):
-    """Rerank retrieved results based on relevance."""
-    scores = []
-    for context in contexts:
-        response = generate_response(f"Does this text answer the question: '{question}'? Text: {context}")
-        if "yes" in response.lower():
-            scores.append((context, 1))
-        else:
-            scores.append((context, 0))
-    ranked_contexts = [context for context, score in scores if score > 0]
-    return ranked_contexts if ranked_contexts else ["I don't know."]
+    inputs = [f"Query: {question} Document: {context}" for context in contexts]
+    inputs_tokenized = tokenizer_rerank(inputs, return_tensors='pt', padding=True, truncation=True, max_length=512)
+    with torch.no_grad():
+        scores = model_rerank(**inputs_tokenized).logits.squeeze().tolist()
 
-def is_response_confident(response):
-    """Check for uncertainty in AI response."""
-    low_confidence_phrases = [
-        "i'm not sure", "i think", "possibly", "maybe", "it seems", "likely",
-        "i guess", "i assume", "it's possible", "as far as i know"
-    ]
-    return not any(phrase in response.lower() for phrase in low_confidence_phrases)
+    # Sort by relevance score
+    ranked_contexts = sorted(zip(contexts, scores), key=lambda x: x[1], reverse=True)
+    return [context for context, _ in ranked_contexts][:TOP_K]
 
-def validate_response(prompt):
-    """Ensure consistent answers by checking multiple responses."""
-    response1 = generate_response(prompt)
-    response2 = generate_response(prompt)
-    if response1.strip().lower() != response2.strip().lower():
-        return "I am not confident about the answer. Please refer to the document."
-    return response1
 
+# Hybrid search (FAISS + BM25 + ColBERT-style reranking)
+def hybrid_search(contexts, question):
+    faiss_results = find_most_relevant_context_faiss(contexts, question)
+    bm25_results = find_most_relevant_context_bm25(contexts, question)
+    combined_results = list(set(faiss_results + bm25_results))
+    if not combined_results:
+        return ["I don't know."]
+    return rerank_results(combined_results, question)
+
+
+# Extract text from PDF
+def extract_text_from_pdf(pdf_file):
+    pdf_reader = PdfReader(pdf_file)
+    text = " ".join([pdf_reader.pages[i].extract_text() or "" for i in range(len(pdf_reader.pages))])
+    return chunk_text(text) if text else ["No text extracted from the PDF"]
+
+
+# Answer questions from PDF
 def answer_question_from_pdf(pdf_text, question):
-    """Answer the question using retrieved PDF context while preventing hallucination."""
     if not pdf_text.strip():
         return "I could not find relevant information in the document."
     
     prompt = f"{pdf_text} The Question is: {question} Provide the answer with max length of about 100 words."
-    response = validate_response(prompt)
+    response = generate_response(prompt)
+    return response if response else "I'm not sure. Please refer to the document."
 
-    if not is_response_confident(response):
-        return "I'm not sure about this. Please refer to the original document."
 
-    return response
-
-def extract_text_from_pdf(pdf_file):
-    """Extract text from a PDF file."""
-    pdf_reader = PdfReader(pdf_file)
-    pdf_arr = [pdf_reader.pages[page_num].extract_text() for page_num in range(len(pdf_reader.pages)) if pdf_reader.pages[page_num].extract_text()]
-    return pdf_arr if pdf_arr else ["No text extracted from the PDF"]
-
-def hybrid_search(contexts, question):
-    """Combine FAISS and BM25 for hybrid retrieval."""
-    faiss_results = find_most_relevant_context_faiss(contexts, question)
-    bm25_results = find_most_relevant_context_bm25(contexts, question)
-    combined_results = list(set(faiss_results + bm25_results))
-    
-    if not combined_results:
-        return ["I don't know."]
-    
-    return rerank_results(combined_results, question)
-
-# Streamlit chatbot UI
-st.title("PDF Chatbot (Serverless with Hybrid Retrieval)")
+# ====== STREAMLIT CHATBOT UI ======
+st.title("PDF Chatbot (Serverless)")
 
 uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
 
@@ -159,16 +142,18 @@ if uploaded_file is not None:
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
-    
+
     question = st.text_input("Ask a question about the PDF")
-    
+
     if st.button("Send") and question:
         combined_results = hybrid_search(pdf_arr, question)
         response = answer_question_from_pdf(" ".join(combined_results), question) if combined_results else "No relevant context found."
+        
         st.session_state.chat_history.append((question, response))
-    
+
     for q, r in st.session_state.chat_history:
         st.write(f"**You:** {q}")
         st.write(f"**Bot:** {r}")
+
 else:
     st.write("Please upload a PDF file to start the chat.")
