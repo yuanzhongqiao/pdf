@@ -92,16 +92,28 @@ def find_most_relevant_context_bm25(contexts, question):
     return top_docs
 
 
-# Rerank results using a transformer-based reranker
+from sklearn.metrics.pairwise import cosine_similarity
+
 def rerank_results(contexts, question):
+    """Reranks results using cosine similarity of embeddings."""
     inputs = [f"Query: {question} Document: {context}" for context in contexts]
+    
+    # Get embeddings
     inputs_tokenized = tokenizer_rerank(inputs, return_tensors='pt', padding=True, truncation=True, max_length=512)
     with torch.no_grad():
-        scores = model_rerank(**inputs_tokenized).logits.squeeze().tolist()
+        embeddings = model_rerank(**inputs_tokenized).pooler_output.cpu().numpy()  # Use embeddings instead of logits
 
-    # Sort by relevance score
+    query_embedding = embeddings[0]  # Query embedding
+    context_embeddings = embeddings[1:]  # Context embeddings
+    
+    # Compute cosine similarity scores
+    scores = cosine_similarity([query_embedding], context_embeddings)[0]
+    
+    # Sort by similarity score
     ranked_contexts = sorted(zip(contexts, scores), key=lambda x: x[1], reverse=True)
+    
     return [context for context, _ in ranked_contexts][:TOP_K]
+
 
 
 # Hybrid search (FAISS + BM25 + ColBERT-style reranking)
