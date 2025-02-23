@@ -4,7 +4,11 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 from sklearn.metrics.pairwise import cosine_similarity
 import torch
+import logging
 from config import TOP_K
+
+# Logging setup
+logger = logging.getLogger(__name__)
 
 def find_most_relevant_context_faiss(contexts, question, embeddings, tokenizer, model):
     question_embedding = get_embeddings([question], tokenizer, model)[0]
@@ -53,11 +57,30 @@ def hybrid_search(contexts, question, embeddings, tokenizer_embed, model_embed, 
     return rerank_results(combined_results, question, tokenizer_rerank, model_rerank)
 
 def get_embeddings(texts, tokenizer, model, batch_size=32):
+    """Generate embeddings in batches, handling invalid inputs."""
+    if not texts:
+        logger.warning("Empty text list provided to get_embeddings.")
+        return np.array([])
+
+    # Filter out invalid entries (None, non-string, empty)
+    valid_texts = [str(text).strip() for text in texts if text is not None and str(text).strip()]
+    if not valid_texts:
+        logger.warning("No valid texts after filtering.")
+        return np.array([])
+
     embeddings = []
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-        inputs = tokenizer(batch, return_tensors='pt', padding=True, truncation=True, max_length=512)
-        with torch.no_grad():
-            outputs = model(**inputs)
-        embeddings.append(outputs.pooler_output.cpu().numpy())
+    for i in range(0, len(valid_texts), batch_size):
+        batch = valid_texts[i:i + batch_size]
+        try:
+            inputs = tokenizer(batch, return_tensors='pt', padding=True, truncation=True, max_length=512)
+            with torch.no_grad():
+                outputs = model(**inputs)
+            embeddings.append(outputs.pooler_output.cpu().numpy())
+        except Exception as e:
+            logger.error(f"Error processing batch {i//batch_size}: {str(e)}")
+
+    if not embeddings:
+        logger.warning("No embeddings generated.")
+        return np.array([])
+
     return np.concatenate(embeddings, axis=0)
