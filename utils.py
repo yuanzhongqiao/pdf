@@ -11,7 +11,7 @@ from config import CHUNK_SIZE, OVERLAP, API_URL_MISTRAL
 logger = logging.getLogger(__name__)
 
 # Use HF_TOKEN from Spaces secrets
-my_token = os.getenv('HF_TOKEN')
+my_token = os.getenv('my_repo_token')
 headers = {"Authorization": f"Bearer {my_token}"}
 
 def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
