@@ -68,8 +68,8 @@ if uploaded_file is not None:
                 st.session_state.chat_history = []
                 st.success("Chat history cleared.")
 
-        # Display chat history
-        for q, r in st.session_state.chat_history:
+        # Display chat history with feedback
+        for i, (q, r) in enumerate(st.session_state.chat_history):
             st.write(f"**You:** {q}")
             if "Error" in r or "Sorry" in r:
                 st.error(r)
@@ -77,6 +77,9 @@ if uploaded_file is not None:
                 st.write(f"**Bot:** {r}")
             with st.expander("See retrieved contexts"):
                 st.write(retrieved_contexts)
+            if st.button("Flag as Incorrect", key=f"flag_{i}"):
+                logger.info(f"Flagged response: Q: {q}, R: {r}")
+                st.warning("Thanks for your feedback! We'll review this response.")
 
 else:
     st.write("📂 Please upload a PDF file to start the chat.")
