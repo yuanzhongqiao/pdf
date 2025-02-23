@@ -28,24 +28,44 @@ def find_most_relevant_context_bm25(contexts, question):
     return bm25.get_top_n(tokenized_question, contexts, n=min(TOP_K, len(contexts)))
 
 def rerank_results(contexts, question, tokenizer, model):
-    inputs = [f"Query: {question} Document: {context}" for context in contexts]
-    inputs_tokenized = tokenizer(inputs, return_tensors='pt', padding=True, truncation=True, max_length=512)
-    with torch.no_grad():
-        embeddings = model(**inputs_tokenized).pooler_output.cpu().numpy()
+    if not contexts:
+        logger.warning("No contexts provided to rerank_results.")
+        return []
 
-    query_embedding = embeddings[0]
-    context_embeddings = embeddings[1:]
-    scores = cosine_similarity([query_embedding], context_embeddings)[0]
+    # Filter valid contexts and create inputs
+    inputs = [f"Query: {question} Document: {context}" for context in contexts if context.strip()]
+    if not inputs:
+        logger.warning("No valid inputs after filtering in rerank_results.")
+        return contexts[:min(TOP_K, len(contexts))]  # Fallback to original order
 
-    # Boost scores for contexts with question keyword overlap
-    question_words = set(question.lower().split())
-    for i, context in enumerate(contexts):
-        context_words = set(context.lower().split())
-        overlap = len(question_words & context_words) / len(question_words)
-        scores[i] += overlap * 0.2  # Weight keyword overlap
+    try:
+        inputs_tokenized = tokenizer(inputs, return_tensors='pt', padding=True, truncation=True, max_length=512)
+        with torch.no_grad():
+            embeddings = model(**inputs_tokenized).pooler_output.cpu().numpy()
 
-    ranked_contexts = sorted(zip(contexts, scores), key=lambda x: x[1], reverse=True)
-    return [context for context, _ in ranked_contexts][:TOP_K]
+        query_embedding = embeddings[0]
+        context_embeddings = embeddings[1:]
+        scores = cosine_similarity([query_embedding], context_embeddings)[0]
+
+        # Ensure scores and contexts align
+        valid_contexts = [ctx for ctx in contexts if ctx.strip()]
+        if len(scores) != len(valid_contexts):
+            logger.error(f"Length mismatch: scores ({len(scores)}) vs valid_contexts ({len(valid_contexts})")
+            return valid_contexts[:min(TOP_K, len(valid_contexts))]  # Fallback
+
+        # Boost scores with keyword overlap
+        question_words = set(question.lower().split())
+        for i, context in enumerate(valid_contexts):
+            context_words = set(context.lower().split())
+            overlap = len(question_words & context_words) / len(question_words)
+            if i < len(scores):  # Safe indexing
+                scores[i] += overlap * 0.2
+
+        ranked_contexts = sorted(zip(valid_contexts, scores), key=lambda x: x[1], reverse=True)
+        return [context for context, _ in ranked_contexts][:TOP_K]
+    except Exception as e:
+        logger.error(f"Error in rerank_results: {str(e)}")
+        return contexts[:min(TOP_K, len(contexts))]  # Fallback to original order
 
 def hybrid_search(contexts, question, embeddings, tokenizer_embed, model_embed, tokenizer_rerank, model_rerank):
     faiss_results = find_most_relevant_context_faiss(contexts, question, embeddings, tokenizer_embed, model_embed)
