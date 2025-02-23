@@ -50,7 +50,7 @@ def rerank_results(contexts, question, tokenizer, model):
         # Ensure scores and contexts align
         valid_contexts = [ctx for ctx in contexts if ctx.strip()]
         if len(scores) != len(valid_contexts):
-            logger.error(f"Length mismatch: scores ({len(scores)}) vs valid_contexts ({len(valid_contexts})")
+            logger.error(f"Length mismatch: scores ({len(scores)}) vs valid_contexts ({len(valid_contexts)})")
             return valid_contexts[:min(TOP_K, len(valid_contexts))]  # Fallback
 
         # Boost scores with keyword overlap
