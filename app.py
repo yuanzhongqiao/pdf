@@ -36,11 +36,15 @@ if uploaded_file is not None:
                 st.warning("No readable text found in the PDF.")
             else:
                 st.session_state.pdf_arr = pdf_arr
-                st.session_state.embeddings = get_embeddings(pdf_arr, tokenizer_embed, model_embed)
-                st.session_state.uploaded_file_name = uploaded_file.name
-                st.success("✅ PDF Uploaded Successfully. Start chatting!")
+                embeddings = get_embeddings(pdf_arr, tokenizer_embed, model_embed)
+                if embeddings.size == 0:
+                    st.error("Failed to generate embeddings from the PDF. Please try another file.")
+                else:
+                    st.session_state.embeddings = embeddings
+                    st.session_state.uploaded_file_name = uploaded_file.name
+                    st.success("✅ PDF Uploaded Successfully. Start chatting!")
     
-    if "pdf_arr" in st.session_state:
+    if "pdf_arr" in st.session_state and "embeddings" in st.session_state:
         # Chat history
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
