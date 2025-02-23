@@ -37,6 +37,13 @@ def rerank_results(contexts, question, tokenizer, model):
     context_embeddings = embeddings[1:]
     scores = cosine_similarity([query_embedding], context_embeddings)[0]
 
+    # Boost scores for contexts with question keyword overlap
+    question_words = set(question.lower().split())
+    for i, context in enumerate(contexts):
+        context_words = set(context.lower().split())
+        overlap = len(question_words & context_words) / len(question_words)
+        scores[i] += overlap * 0.2  # Weight keyword overlap
+
     ranked_contexts = sorted(zip(contexts, scores), key=lambda x: x[1], reverse=True)
     return [context for context, _ in ranked_contexts][:TOP_K]
 
@@ -57,12 +64,10 @@ def hybrid_search(contexts, question, embeddings, tokenizer_embed, model_embed, 
     return rerank_results(combined_results, question, tokenizer_rerank, model_rerank)
 
 def get_embeddings(texts, tokenizer, model, batch_size=32):
-    """Generate embeddings in batches, handling invalid inputs."""
     if not texts:
         logger.warning("Empty text list provided to get_embeddings.")
         return np.array([])
 
-    # Filter out invalid entries (None, non-string, empty)
     valid_texts = [str(text).strip() for text in texts if text is not None and str(text).strip()]
     if not valid_texts:
         logger.warning("No valid texts after filtering.")
