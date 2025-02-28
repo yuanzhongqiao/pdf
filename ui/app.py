@@ -24,6 +24,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
+
 # Initialize components
 def initialize_components():
     """Initialize all system components."""

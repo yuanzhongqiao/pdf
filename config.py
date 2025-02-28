@@ -8,7 +8,15 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+# LLM settings
+LLM_MODEL_NAME = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
+LLM_API_KEY = os.getenv("OPENAI_API_KEY")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 
+# HuggingFace API settings
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+HUGGINGFACE_MODEL = os.getenv("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.2")
 # Embedding model settings
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "384"))

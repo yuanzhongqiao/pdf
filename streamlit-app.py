@@ -34,17 +34,42 @@ if "initialized" not in st.session_state:
 # Initialize RAG engine
 @st.cache_resource
 def initialize_rag_engine():
-    """Initialize RAG engine."""
+    """Initialize RAG engine with appropriate LLM."""
     from embedding.model import create_embedding_model
     from storage.vector_db import create_vector_database
     from rag.engine import create_rag_engine
+    from llm.model import create_llm
     
     # Create components
     embedding_model = create_embedding_model()
-    vector_db = create_vector_database(dimension=embedding_model.dimension)
+    
+    # Use KeywordVectorDatabase if facing FAISS installation issues
+    try:
+        vector_db = create_vector_database(dimension=embedding_model.dimension)
+    except Exception as e:
+        logger.warning(f"Error creating FAISS database: {e}, falling back to keyword database")
+        vector_db = create_vector_database(db_type="keyword", dimension=embedding_model.dimension)
+    
+    # Try to get HuggingFace API key from secrets
+    api_key = None
+    try:
+        api_key = st.secrets.get("HUGGINGFACE_API_KEY")
+    except:
+        pass
+    
+    # Create LLM - try serverless first, fall back to local
+    if api_key:
+        llm = create_llm(model_type="serverless", api_key=api_key)
+        logger.info("Using serverless LLM with HuggingFace API")
+    else:
+        llm = create_llm(model_type="local")
+        logger.info("Using local LLM implementation")
+    
+    # Create RAG engine with the LLM
     rag_engine = create_rag_engine(
         embedder=embedding_model,
-        vector_db=vector_db
+        vector_db=vector_db,
+        llm=llm
     )
     
     st.session_state.initialized = True
