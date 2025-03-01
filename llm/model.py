@@ -248,6 +248,206 @@ class LocalLLM(BaseLLM):
         return self.generate_response(prompt, max_tokens)
 
 
+class ChainOfThoughtLLM(BaseLLM):
+    """LLM wrapper that applies chain-of-thought reasoning."""
+    
+    def __init__(self, base_llm: BaseLLM):
+        """
+        Initialize with a base LLM.
+        
+        Args:
+            base_llm: The underlying LLM to use
+        """
+        self.base_llm = base_llm
+        self.available = base_llm.available
+    
+    def generate_response(self, prompt: str, max_tokens: int = 512) -> str:
+        """
+        Generate a response using chain-of-thought reasoning.
+        
+        Args:
+            prompt: Input prompt
+            max_tokens: Maximum tokens to generate
+            
+        Returns:
+            Generated response with reasoning
+        """
+        logger.info("Generating response using Chain of Thought reasoning")
+        
+        # First pass: generate reasoning steps
+        reasoning_response = self.base_llm.generate_response(prompt, max_tokens=max_tokens)
+        
+        # Extract reasoning
+        reasoning = reasoning_response
+        
+        # Second pass: generate final answer based on reasoning
+        final_prompt = prompt + "\n\n" + reasoning + "\n\nFinal answer:"
+        final_response = self.base_llm.generate_response(final_prompt, max_tokens=max_tokens//2)
+        
+        # Format the complete response
+        complete_response = f"""
+Step-by-step reasoning:
+{reasoning}
+
+Therefore, my answer is:
+{final_response}
+"""
+        
+        return complete_response
+    
+    def generate_openai_response(self, prompt: str, max_tokens: int = 512) -> str:
+        """Pass through to base LLM for OpenAI responses."""
+        if hasattr(self.base_llm, "generate_openai_response"):
+            return self.generate_response(prompt, max_tokens)
+        return self.generate_response(prompt, max_tokens)
+    
+    def generate_huggingface_response(self, prompt: str, max_tokens: int = 512) -> str:
+        """Pass through to base LLM for HuggingFace responses."""
+        if hasattr(self.base_llm, "generate_huggingface_response"):
+            return self.generate_response(prompt, max_tokens)
+        return self.generate_response(prompt, max_tokens)
+
+
+class ServerlessLLM(BaseLLM):
+    """LLM implementation that uses serverless API endpoints for inference."""
+    
+    def __init__(
+        self, 
+        api_endpoint: Optional[str] = None,
+        api_key: Optional[str] = None
+    ):
+        """
+        Initialize the serverless LLM.
+        
+        Args:
+            api_endpoint: Optional endpoint URL (defaults to HuggingFace inference API)
+            api_key: API key for authentication
+        """
+        self.api_endpoint = api_endpoint or "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+        self.api_key = api_key or os.environ.get("HUGGINGFACE_API_KEY")
+        self.headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        self.available = self.api_key is not None
+    
+    def generate_response(self, prompt: str, max_tokens: int = 512) -> str:
+        """
+        Generate a response using the serverless API.
+        
+        Args:
+            prompt: Input prompt
+            max_tokens: Maximum number of tokens to generate
+            
+        Returns:
+            Generated response
+        """
+        if not self.available:
+            return "Serverless LLM is not available. Please provide an API key."
+        
+        try:
+            import requests
+        except ImportError:
+            return "Requests library not installed. Please install with `pip install requests`."
+            
+        # Create a properly formatted prompt for instruction-following models
+        formatted_prompt = self._format_instruction_prompt(prompt)
+        
+        try:
+            # Call the API
+            payload = {
+                "inputs": formatted_prompt,
+                "parameters": {
+                    "max_new_tokens": max_tokens,
+                    "temperature": 0.1,
+                    "top_p": 0.95,
+                    "repetition_penalty": 1.15,
+                    "do_sample": True
+                }
+            }
+            
+            response = requests.post(
+                self.api_endpoint, 
+                headers=self.headers, 
+                json=payload,
+                timeout=30
+            )
+            
+            # Check for errors
+            if response.status_code != 200:
+                logger.error(f"API error: {response.status_code} - {response.text}")
+                return f"Error calling API: {response.status_code}"
+            
+            # Parse response based on the API format
+            try:
+                # For HuggingFace Inference API
+                result = response.json()
+                if isinstance(result, list) and len(result) > 0 and "generated_text" in result[0]:
+                    return result[0]["generated_text"].strip()
+                elif isinstance(result, dict) and "generated_text" in result:
+                    return result["generated_text"].strip()
+                else:
+                    return str(result)
+            except Exception as e:
+                logger.error(f"Error parsing API response: {e}")
+                return f"Error parsing API response: {str(e)}"
+                
+        except Exception as e:
+            logger.error(f"Error generating response with serverless LLM: {e}")
+            return f"Error generating response: {str(e)}"
+    
+    def _format_instruction_prompt(self, prompt: str) -> str:
+        """
+        Format the prompt for instruction-following models.
+        
+        Args:
+            prompt: Raw prompt with context and question
+            
+        Returns:
+            Formatted prompt
+        """
+        # Extract context and question from RAG prompt
+        context = ""
+        question = prompt
+        
+        if "Context:" in prompt and "Question:" in prompt:
+            context_parts = prompt.split("Context:")[1].split("Question:")[0].strip()
+            question_part = prompt.split("Question:")[-1].strip()
+            
+            # Format for a Mistral-style instruction prompt
+            return f"""<s>[INST] You are a helpful, accurate assistant. Please answer the following question using only the provided context. If the context doesn't contain the answer, say "I don't have enough information to answer that question."
+
+Context:
+{context_parts}
+
+Question:
+{question_part} [/INST]</s>"""
+        else:
+            # If not in expected format, use a simpler prompt
+            return f"""<s>[INST] {prompt} [/INST]</s>"""
+    
+    def generate_huggingface_response(self, prompt: str, max_tokens: int = 512) -> str:
+        """Alias for generate_response for compatibility."""
+        return self.generate_response(prompt, max_tokens)
+
+
+class HuggingFaceInferenceAPI(ServerlessLLM):
+    """Specialized class for HuggingFace Inference API."""
+    
+    def __init__(
+        self,
+        model_name: str = "mistralai/Mistral-7B-Instruct-v0.2",
+        api_key: Optional[str] = None
+    ):
+        """
+        Initialize the HuggingFace Inference API client.
+        
+        Args:
+            model_name: Model identifier on HuggingFace
+            api_key: HuggingFace API token
+        """
+        api_endpoint = f"https://api-inference.huggingface.co/models/{model_name}"
+        super().__init__(api_endpoint=api_endpoint, api_key=api_key)
+        self.model_name = model_name
+
+
 # Factory function to create LLM instances
 def create_llm(
     model_type: str = "local",
@@ -269,19 +469,27 @@ def create_llm(
     """
     # Try to get config
     try:
-        from config import LLM_MODEL_NAME, LLM_API_KEY
+        from config import LLM_MODEL_NAME, LLM_API_KEY, HUGGINGFACE_API_KEY, HUGGINGFACE_MODEL
         
         # Set defaults from config if not provided
         if model_name is None:
-            logger.info("Using default model name from config")
-            model_name = LLM_MODEL_NAME
+            if model_type == "openai":
+                model_name = LLM_MODEL_NAME
+            elif model_type in ["huggingface", "serverless"]:
+                model_name = HUGGINGFACE_MODEL
+        
         if api_key is None:
-            logger.info("Using default API key from config")
-            api_key = LLM_API_KEY
+            if model_type == "openai":
+                api_key = LLM_API_KEY
+            elif model_type in ["huggingface", "serverless"]:
+                api_key = HUGGINGFACE_API_KEY
     except (ImportError, AttributeError):
         # Use defaults if config not available
         if model_name is None:
-            model_name = "gpt-3.5-turbo" if model_type == "openai" else None
+            if model_type == "openai":
+                model_name = "gpt-3.5-turbo"
+            elif model_type in ["huggingface", "serverless"]:
+                model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     
     # Try to get API key from Streamlit secrets if available
     try:
@@ -297,21 +505,26 @@ def create_llm(
     if model_type.lower() == "openai":
         return OpenAIModel(model_name=model_name, api_key=api_key, **kwargs)
     elif model_type.lower() == "serverless":
-        try:
-            from .serverless_model import create_serverless_llm
-            return create_serverless_llm(model_name=model_name, api_key=api_key, **kwargs)
-        except ImportError:
-            logger.warning("Serverless LLM not available, falling back to local model")
-            return LocalLLM()
+        return HuggingFaceInferenceAPI(model_name=model_name, api_key=api_key)
     elif model_type.lower() in ["huggingface", "hf"]:
-        # Try to use serverless HuggingFace API
-        try:
-            from .serverless_model import HuggingFaceInferenceAPI
-            return HuggingFaceInferenceAPI(model_name=model_name, api_key=api_key)
-        except ImportError:
-            # Fall back to local model
-            logger.warning("HuggingFace API model not available, falling back to local model")
-            return LocalLLM()
+        return HuggingFaceInferenceAPI(model_name=model_name, api_key=api_key)
     else:
         # Default to local model
         return LocalLLM()
+
+
+# Function to create a Chain of Thought wrapper around any LLM
+def create_cot_llm(base_llm: Optional[BaseLLM] = None) -> ChainOfThoughtLLM:
+    """
+    Create a Chain of Thought wrapper around an LLM.
+    
+    Args:
+        base_llm: Base LLM to wrap (creates a new one if None)
+        
+    Returns:
+        Chain of Thought LLM wrapper
+    """
+    if base_llm is None:
+        base_llm = create_llm()
+    
+    return ChainOfThoughtLLM(base_llm)

@@ -8,15 +8,7 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-# LLM settings
-LLM_MODEL_NAME = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
-LLM_API_KEY = os.getenv("OPENAI_API_KEY")
-LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 
-# HuggingFace API settings
-HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
-HUGGINGFACE_MODEL = os.getenv("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.2")
 # Embedding model settings
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "384"))
@@ -26,6 +18,8 @@ USE_GPU = os.getenv("USE_GPU", "True").lower() in ("true", "1", "t")
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 MAX_LENGTH = int(os.getenv("MAX_LENGTH", "512"))
+MIN_CHUNK_SIZE = int(os.getenv("MIN_CHUNK_SIZE", "200"))
+MAX_SINGLE_CHUNK_SIZE = int(os.getenv("MAX_SINGLE_CHUNK_SIZE", "10000"))
 
 # Vector database settings
 VECTOR_DB_TYPE = os.getenv("VECTOR_DB_TYPE", "faiss")  # Options: "faiss", "milvus", etc.
@@ -46,6 +40,10 @@ LLM_API_KEY = os.getenv("OPENAI_API_KEY")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 
+# HuggingFace API settings
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+HUGGINGFACE_MODEL = os.getenv("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.2")
+
 # Local LLM settings (optional)
 LOCAL_LLM_MODEL_NAME = os.getenv("LOCAL_LLM_MODEL", "google/flan-t5-base")
 USE_LOCAL_LLM = os.getenv("USE_LOCAL_LLM", "False").lower() in ("true", "1", "t")
@@ -58,7 +56,6 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FORMAT = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-# Default prompt template
 # Default prompt template
 DEFAULT_PROMPT_TEMPLATE = """
 Answer the following question based ONLY on the provided context. 
@@ -118,7 +115,7 @@ Summary:
 DOCUMENT_COMPARE_TEMPLATE = """
 Analyze the following context chunks from the document and compare/contrast the information they contain.
 
-Context:
+Context chunks:
 {context}
 
 Instructions:
@@ -149,6 +146,26 @@ Instructions:
 
 Analysis:
 """
+
+# Chain of Thought template for complex reasoning
+CHAIN_OF_THOUGHT_TEMPLATE = """
+Answer the following question based ONLY on the provided context.
+Think step-by-step to solve this problem:
+
+1. First, identify the key information in the context that's relevant to the question.
+2. Consider what facts from the context are needed to answer accurately.
+3. Break down any complex reasoning into clear logical steps.
+4. Reason carefully about how these pieces of information connect.
+5. Finally, formulate your answer based on this reasoning.
+
+Context:
+{context}
+
+Question: {query}
+
+Step-by-step reasoning:
+"""
+
 
 def get_logging_config() -> Dict[str, Any]:
     """Get logging configuration dictionary."""

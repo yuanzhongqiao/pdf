@@ -1,105 +1,98 @@
-# RAG System
+# Document Embedding and Retrieval System
 
-A modular Retrieval-Augmented Generation (RAG) system for document-based question answering.
+## Overview
+A sophisticated document processing pipeline that extracts, chunks, embeds, and indexes documents for semantic search and retrieval.
 
-## Features
+## 🚀 Key Features
+- Intelligent document text extraction
+- Adaptive text chunking
+- Semantic embedding generation
+- Vector database storage
+- Efficient document processing
 
-- **Document Processing**: Extract and chunk text from PDF, DOCX, and TXT files
-- **Semantic Search**: Embed and search documents based on meaning, not just keywords
-- **Flexible Architecture**: Support for multiple embedding models and vector databases
-- **REST API**: API for integrating with other applications
-- **Web UI**: User-friendly Streamlit interface for document upload and querying
+## 🛠 Technical Architecture
+- Language: Python
+- Embedding Model: Sentence Transformers
+- Vector Database: Supports multiple backends (e.g., Chroma, Pinecone)
+- Processing: Batch-optimized embedding generation
 
-## Architecture
-
-The system consists of the following components:
-
-- **Embedding Model**: Converts text to vector embeddings
-- **Vector Database**: Stores and searches document embeddings
-- **Document Processor**: Extracts and chunks text from documents
-- **RAG Engine**: Combines retrieval and generation for question answering
-- **API**: Exposes functionality through a RESTful API
-- **UI**: Provides a user interface for interacting with the system
-
-## Installation
-
-### Prerequisites
-
+## 📦 Prerequisites
 - Python 3.8+
-- pip
+- PyTorch
+- Sentence Transformers
+- Vector Database Library
 
-### Setup
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/rag-system.git
-   cd rag-system
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Set up environment variables (optional):
-   ```bash
-   cp .env.example .env
-   # Edit .env with your settings
-   ```
-
-## Usage
-
-### API Server
-
-Run the API server:
+## 🔧 Installation
 
 ```bash
-python app.py
+# Clone the repository
+git clone https://github.com/yourusername/document-embedding-system.git
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-The API will be available at http://localhost:8000
+## 🌟 Key Components
 
-### Streamlit UI
+### Document Processing Workflow
+1. Text Extraction
+2. Text Chunking
+3. Semantic Embedding
+4. Vector Database Indexing
 
-Run the Streamlit UI:
-
-```bash
-streamlit run ui/app.py
+### Example Usage
+```python
+processor = DocumentProcessor()
+document_id = processor.process_document('path/to/document.pdf')
 ```
 
-The UI will be available at http://localhost:8501
+## 🔍 Performance Optimizations
+- Batch embedding generation
+- Efficient vector storage
+- Minimal memory overhead
+- Scalable architecture
 
-## API Endpoints
+## 🛡️ Error Handling
+- Robust error management
+- Comprehensive logging
+- Graceful failure mechanisms
 
-- `POST /documents`: Add documents
-- `POST /upload`: Upload and process document files
-- `POST /query`: Query the RAG system
-- `GET /search`: Search for documents
-- `DELETE /documents`: Clear all documents
-- `GET /health`: Check system health
+## 📊 Supported Document Types
+- PDF
+- DOCX
+- TXT
+- CSV
+- JSON
 
-## Configuration
+## 🔬 Advanced Features
+- Metadata extraction
+- Configurable chunk sizes
+- Multi-model support
+- Parallel processing capabilities
 
-The system can be configured through environment variables or the `config.py` file:
+## 🚧 Roadmap
+- [ ] Add more document type support
+- [ ] Implement advanced semantic search
+- [ ] Create REST API interface
+- [ ] Add machine learning model fine-tuning
 
-- `EMBEDDING_MODEL_NAME`: Name of the embedding model
-- `VECTOR_DB_TYPE`: Type of vector database to use
-- `CHUNK_SIZE`: Size of document chunks
-- `CHUNK_OVERLAP`: Overlap between chunks
-- `TOP_K`: Number of documents to retrieve
-- `SEARCH_TYPE`: Type of search (semantic, keyword, hybrid)
-- `LLM_MODEL_NAME`: Name of the language model for generation
-- `LLM_API_KEY`: API key for the language model
+## 💡 Contributing
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
-## Extending
+## 📜 License
+MIT License
 
-The modular architecture makes it easy to extend the system:
+## 📞 Contact
+Navid Mirnouri - navid72m@gmail.com   
 
-- Add new embedding models in `embedding/model.py`
-- Add new vector databases in `storage/vector_db.py`
-- Add support for new document types in `document/processor.py`
-- Add new LLM integrations in `llm/model.py`
+---
 
-## License
-
-[MIT License](LICENSE)
+**Note**: Ensure you have appropriate computational resources for processing large document collections.

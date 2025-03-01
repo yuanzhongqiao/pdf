@@ -196,7 +196,8 @@ class RAGEngine:
         top_k: Optional[int] = None,
         search_type: Optional[str] = None,
         filter_dict: Optional[Dict[str, Any]] = None,
-        max_tokens: int = 512
+        max_tokens: int = 512,
+        use_reasoning: bool = False
     ) -> Dict[str, Any]:
         """
         Generate a response to a query using RAG.
@@ -207,6 +208,7 @@ class RAGEngine:
             search_type: Type of search
             filter_dict: Optional filter for document retrieval
             max_tokens: Maximum number of tokens in the response
+            use_reasoning: Whether to use chain-of-thought reasoning
             
         Returns:
             Dictionary with query, response, and retrieved documents
@@ -231,16 +233,28 @@ class RAGEngine:
         # Get metadata for template selection
         metadata = [doc.get("metadata", {}) for doc in retrieved_docs]
         
+        # Check if the question is complex and might benefit from CoT
+        is_complex_question = any(term in query.lower() for term in [
+            'why', 'how', 'explain', 'reason', 'analyze', 'compare', 'relationship'
+        ])
+        
         # Select appropriate template based on query and context
         template = self.prompt_template
         template_name = "default"
+        current_llm = self.llm
         
         try:
             from rag.template_selector import TemplateSelector
             template_selector = TemplateSelector()
-            template = template_selector.select_template(query, context, metadata)
+            template = template_selector.select_template(query, context, metadata, use_reasoning)
             template_name = getattr(template_selector, "selected_template_name", "default")
             logger.info(f"Using template: {template_name}")
+            
+            # Apply CoT wrapper for complex questions or if reasoning is requested
+            if (template_name in ["chain_of_thought", "technical", "compare"] and is_complex_question) or use_reasoning:
+                from llm.model import ChainOfThoughtLLM
+                current_llm = ChainOfThoughtLLM(self.llm)
+                logger.info(f"Using Chain of Thought reasoning for complex question")
         except Exception as e:
             logger.warning(f"Could not use template selector: {e}, using default template")
         
@@ -249,7 +263,7 @@ class RAGEngine:
         logger.info(f"Created prompt of length {len(prompt)} chars")
         
         # Log sample of the prompt for debugging
-        logger.info(f"Prompt sample: {prompt}...")
+        logger.info(f"Prompt sample: {prompt[:500]}...")
         
         # Generate response using LLM
         if self.llm is None:
@@ -257,14 +271,14 @@ class RAGEngine:
             from llm.model import LocalLLM
             logger.info("No LLM provided, creating a simple local LLM")
             self.llm = LocalLLM()
-            response = self._generate_llm_response(prompt, max_tokens)
+            response = self._generate_llm_response(prompt, max_tokens, llm=current_llm)
         else:
-            response = self._generate_llm_response(prompt, max_tokens)
+            response = self._generate_llm_response(prompt, max_tokens, llm=current_llm)
         
         logger.info(f"Generated response of length {len(response)} chars")
         
         # Return the results
-        return {
+        result = {
             "query": query,
             "response": response,
             "retrieved_documents": retrieved_docs,
@@ -272,6 +286,15 @@ class RAGEngine:
             "template_used": template_name,
             "context_length": len(context)
         }
+        
+        # Add reasoning info if ChainOfThoughtLLM was used
+        try:
+            from llm.model import ChainOfThoughtLLM
+            result["reasoning_used"] = isinstance(current_llm, ChainOfThoughtLLM)
+        except ImportError:
+            result["reasoning_used"] = False
+            
+        return result
     
     def _format_context(self, documents: List[Dict[str, Any]]) -> str:
         """
@@ -322,17 +345,21 @@ class RAGEngine:
             
         return context
     
-    def _generate_llm_response(self, prompt: str, max_tokens: int) -> str:
+    def _generate_llm_response(self, prompt: str, max_tokens: int, llm=None) -> str:
         """
         Generate a response using the LLM.
         
         Args:
             prompt: The formatted prompt
             max_tokens: Maximum number of tokens in the response
+            llm: Optional override LLM to use (defaults to self.llm)
             
         Returns:
             Generated response
         """
+        # Use provided LLM or fall back to instance LLM
+        current_llm = llm or self.llm
+        
         try:
             # Make sure the prompt has a context section
             if "Context:" not in prompt:
@@ -346,15 +373,15 @@ class RAGEngine:
                 return "I don't have enough information to answer this question."
             
             # Use appropriate method based on LLM type
-            if hasattr(self.llm, "generate_openai_response"):
+            if hasattr(current_llm, "generate_openai_response"):
                 # OpenAI-compatible LLM
-                return self.llm.generate_openai_response(prompt, max_tokens)
-            elif hasattr(self.llm, "generate_huggingface_response"):
+                return current_llm.generate_openai_response(prompt, max_tokens)
+            elif hasattr(current_llm, "generate_huggingface_response"):
                 # HuggingFace-compatible LLM
-                return self.llm.generate_huggingface_response(prompt, max_tokens)
+                return current_llm.generate_huggingface_response(prompt, max_tokens)
             else:
                 # Default implementation
-                return self.llm.generate_response(prompt, max_tokens)
+                return current_llm.generate_response(prompt, max_tokens)
         except Exception as e:
             logger.error(f"Error generating response: {e}", exc_info=True)
             return f"I encountered an error while generating a response: {str(e)}"
@@ -406,6 +433,7 @@ def create_rag_engine(
     # Load configuration if provided
     if config is None:
         try:
+            # Use absolute imports to avoid issues
             from config import (
                 TOP_K,
                 SEARCH_TYPE,
