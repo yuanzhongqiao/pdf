@@ -42,8 +42,22 @@ class RAGEngine:
         
         # Set default prompt template if none provided
         if prompt_template is None:
-            from config import DEFAULT_PROMPT_TEMPLATE
-            self.prompt_template = DEFAULT_PROMPT_TEMPLATE
+            try:
+                from config import DEFAULT_PROMPT_TEMPLATE
+                self.prompt_template = DEFAULT_PROMPT_TEMPLATE
+            except ImportError:
+                # Fallback template if config not available
+                self.prompt_template = """
+                Answer the following question based ONLY on the provided context.
+                If you cannot answer the question based on the context, say "I don't have enough information to answer this question."
+
+                Context:
+                {context}
+
+                Question: {query}
+
+                Answer:
+                """
         else:
             self.prompt_template = prompt_template
     
@@ -71,6 +85,10 @@ class RAGEngine:
             metadata = [{} for _ in texts]
         elif len(metadata) != len(texts):
             raise ValueError(f"Length mismatch: got {len(texts)} texts but {len(metadata)} metadata entries")
+        
+        # Log what we're adding
+        logger.info(f"Adding {len(texts)} documents to database")
+        logger.info(f"First document sample: {texts[0][:100]}...")
         
         # Generate embeddings in batches
         doc_ids = []
@@ -120,6 +138,9 @@ class RAGEngine:
             
         if search_type is None:
             search_type = self.search_type
+            
+        # Print debugging info
+        logger.info(f"Searching for: '{query}' with search_type={search_type}, top_k={top_k}")
         
         # Create filter function if filter_dict is provided
         filter_func = None
@@ -140,22 +161,34 @@ class RAGEngine:
                         return False
                 return True
         
-        # Generate query embedding
-        query_embedding = self.embedder.embed(query)
-        
-        # Perform search
-        results = self.vector_db.search(query_embedding, top_k, filter_func)
-        
-        # Convert results to dictionaries
-        return [
-            {
-                "id": doc.id,
-                "text": doc.text,
-                "metadata": doc.metadata,
-                "score": score
-            }
-            for doc, score in results
-        ]
+        try:
+            # Generate query embedding
+            query_embedding = self.embedder.embed(query)
+            
+            # Log embedding info
+            logger.info(f"Query embedding created with shape: {query_embedding.shape}")
+            
+            # Perform search
+            results = self.vector_db.search(query_embedding, top_k, filter_func)
+            
+            # Log what was found
+            logger.info(f"Found {len(results)} results")
+            for i, (doc, score) in enumerate(results[:3]):  # Log first 3 results
+                logger.info(f"Result {i+1}: score={score:.4f}, id={doc.id}, text='{doc.text[:100]}...'")
+            
+            # Convert results to dictionaries
+            return [
+                {
+                    "id": doc.id,
+                    "text": doc.text,
+                    "metadata": doc.metadata,
+                    "score": score
+                }
+                for doc, score in results
+            ]
+        except Exception as e:
+            logger.error(f"Error during search: {e}", exc_info=True)
+            return []
     
     def generate_response(
         self,
@@ -183,6 +216,7 @@ class RAGEngine:
         
         # If no documents were found, return a default message
         if not retrieved_docs:
+            logger.warning("No relevant documents found for query")
             return {
                 "query": query,
                 "response": "I couldn't find any relevant information to answer your question.",
@@ -192,23 +226,51 @@ class RAGEngine:
         
         # Format context from retrieved documents
         context = self._format_context(retrieved_docs)
+        logger.info(f"Formatted context with {len(retrieved_docs)} documents, length: {len(context)} chars")
+        
+        # Get metadata for template selection
+        metadata = [doc.get("metadata", {}) for doc in retrieved_docs]
+        
+        # Select appropriate template based on query and context
+        template = self.prompt_template
+        template_name = "default"
+        
+        try:
+            from rag.template_selector import TemplateSelector
+            template_selector = TemplateSelector()
+            template = template_selector.select_template(query, context, metadata)
+            template_name = getattr(template_selector, "selected_template_name", "default")
+            logger.info(f"Using template: {template_name}")
+        except Exception as e:
+            logger.warning(f"Could not use template selector: {e}, using default template")
         
         # Format prompt with context and query
-        prompt = self.prompt_template.format(context=context, query=query)
+        prompt = template.format(context=context, query=query)
+        logger.info(f"Created prompt of length {len(prompt)} chars")
+        
+        # Log sample of the prompt for debugging
+        logger.info(f"Prompt sample: {prompt}...")
         
         # Generate response using LLM
         if self.llm is None:
-            logger.warning("No LLM provided, returning only retrieved documents")
-            response = "No language model available to generate a response. Here's what I found in the documents."
+            # Create a simple local LLM if none is provided
+            from llm.model import LocalLLM
+            logger.info("No LLM provided, creating a simple local LLM")
+            self.llm = LocalLLM()
+            response = self._generate_llm_response(prompt, max_tokens)
         else:
             response = self._generate_llm_response(prompt, max_tokens)
+        
+        logger.info(f"Generated response of length {len(response)} chars")
         
         # Return the results
         return {
             "query": query,
             "response": response,
             "retrieved_documents": retrieved_docs,
-            "search_type": search_type or self.search_type
+            "search_type": search_type or self.search_type,
+            "template_used": template_name,
+            "context_length": len(context)
         }
     
     def _format_context(self, documents: List[Dict[str, Any]]) -> str:
@@ -221,6 +283,13 @@ class RAGEngine:
         Returns:
             Formatted context string
         """
+        # Log how many documents we're formatting
+        logger.info(f"Formatting context from {len(documents)} documents")
+        
+        if not documents:
+            logger.warning("No documents provided for context formatting")
+            return "No relevant context found."
+            
         context_parts = []
         
         for i, doc in enumerate(documents):
@@ -229,11 +298,29 @@ class RAGEngine:
             metadata = doc["metadata"]
             source = metadata.get("source", "Unknown")
             
-            # Format the document
-            doc_text = f"Document {i+1}: [Source: {source}]\n{text}\n"
+            # Skip empty documents
+            if not text or not text.strip():
+                logger.warning(f"Empty document at index {i}, skipping")
+                continue
+                
+            # Format the document with clear separation
+            doc_text = f"Document {i+1}: [Source: {source}]\n{text}\n\n"
             context_parts.append(doc_text)
         
-        return "\n".join(context_parts)
+        # Join all context parts with clear separation
+        context = "\n".join(context_parts)
+        
+        # Log context length and preview for debugging
+        logger.info(f"Created context of length {len(context)} characters")
+        if context:
+            logger.info(f"Context preview: {context[:200]}...")
+        
+        # Add fallback if context is empty
+        if not context.strip():
+            logger.warning("Empty context created after formatting, adding fallback")
+            return "No relevant context found."
+            
+        return context
     
     def _generate_llm_response(self, prompt: str, max_tokens: int) -> str:
         """
@@ -246,19 +333,31 @@ class RAGEngine:
         Returns:
             Generated response
         """
-        if hasattr(self.llm, "generate_openai_response"):
-            # OpenAI-compatible LLM
-            return self.llm.generate_openai_response(prompt, max_tokens)
-        elif hasattr(self.llm, "generate_huggingface_response"):
-            # HuggingFace-compatible LLM
-            return self.llm.generate_huggingface_response(prompt, max_tokens)
-        else:
-            # Default implementation
-            try:
+        try:
+            # Make sure the prompt has a context section
+            if "Context:" not in prompt:
+                logger.warning("Prompt is missing Context section")
+                return "I couldn't process your question due to a system error."
+                
+            # Make sure context is not empty
+            context_section = prompt.split("Context:")[1].split("Question:")[0].strip()
+            if not context_section:
+                logger.warning("Context section is empty in prompt")
+                return "I don't have enough information to answer this question."
+            
+            # Use appropriate method based on LLM type
+            if hasattr(self.llm, "generate_openai_response"):
+                # OpenAI-compatible LLM
+                return self.llm.generate_openai_response(prompt, max_tokens)
+            elif hasattr(self.llm, "generate_huggingface_response"):
+                # HuggingFace-compatible LLM
+                return self.llm.generate_huggingface_response(prompt, max_tokens)
+            else:
+                # Default implementation
                 return self.llm.generate_response(prompt, max_tokens)
-            except Exception as e:
-                logger.error(f"Error generating response: {e}")
-                return "I encountered an error while generating a response."
+        except Exception as e:
+            logger.error(f"Error generating response: {e}", exc_info=True)
+            return f"I encountered an error while generating a response: {str(e)}"
     
     def update_prompt_template(self, new_template: str) -> None:
         """
@@ -306,11 +405,26 @@ def create_rag_engine(
     """
     # Load configuration if provided
     if config is None:
-        from config import (
-            TOP_K,
-            SEARCH_TYPE,
-            DEFAULT_PROMPT_TEMPLATE
-        )
+        try:
+            from config import (
+                TOP_K,
+                SEARCH_TYPE,
+                DEFAULT_PROMPT_TEMPLATE
+            )
+        except ImportError:
+            # Default values if config not available
+            TOP_K = 5
+            SEARCH_TYPE = "hybrid"
+            DEFAULT_PROMPT_TEMPLATE = """
+            Answer the following question based ONLY on the provided context.
+            
+            Context:
+            {context}
+            
+            Question: {query}
+            
+            Answer:
+            """
     else:
         TOP_K = config.get("TOP_K", 5)
         SEARCH_TYPE = config.get("SEARCH_TYPE", "hybrid")
@@ -330,21 +444,29 @@ def create_rag_engine(
     
     # Create embedding model if not provided
     if embedder is None:
-        from embedding.model import create_embedding_model
-        embedder = create_embedding_model()
+        try:
+            from embedding.model import create_embedding_model
+            embedder = create_embedding_model()
+        except Exception as e:
+            logger.error(f"Error creating embedding model: {e}", exc_info=True)
+            raise
     
     # Create vector database if not provided
     if vector_db is None:
-        from storage.vector_db import create_vector_database
-        vector_db = create_vector_database(dimension=embedder.dimension)
+        try:
+            from storage.vector_db import create_vector_database
+            vector_db = create_vector_database(dimension=embedder.dimension)
+        except Exception as e:
+            logger.error(f"Error creating vector database: {e}", exc_info=True)
+            raise
     
-    # Create language model if not provided and requested
+    # Create language model if not provided
     if llm is None:
         try:
             from llm.model import create_llm
             llm = create_llm()
-        except (ImportError, ModuleNotFoundError):
-            logger.warning("LLM module not found, proceeding without an LLM")
+        except (ImportError, ModuleNotFoundError) as e:
+            logger.warning(f"LLM module not found, proceeding without an LLM: {e}")
     
     # Create and return the RAG engine
     return RAGEngine(

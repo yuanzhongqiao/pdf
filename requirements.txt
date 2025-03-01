@@ -15,7 +15,9 @@ faiss-cpu
 # Document processing
 PyPDF2>=3.0.0
 python-docx>=0.8.11
-
+pdfplumber>=0.5.28
+# fitz>=0.0.1
+PyMuPDF>=1.18.20
 # LLM integration (optional)
 openai>=1.0.0
 

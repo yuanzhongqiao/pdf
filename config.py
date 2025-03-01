@@ -59,6 +59,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FORMAT = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 # Default prompt template
+# Default prompt template
 DEFAULT_PROMPT_TEMPLATE = """
 Answer the following question based ONLY on the provided context. 
 If you cannot answer the question based on the context, say "I don't have enough information to answer this question."
@@ -71,6 +72,83 @@ Question: {query}
 Answer:
 """
 
+# Enhanced prompt templates for different query types
+ENHANCED_PROMPT_TEMPLATE = """
+You are a precise and knowledgeable assistant specialized in document analysis. 
+Answer the following question based ONLY on the provided context.
+
+If the context doesn't contain enough information, respond with "I don't have enough information to answer this question completely." and suggest what additional information might be helpful.
+
+If the question asks about the document as a whole, synthesize the information from all provided context chunks to give an overview.
+
+Context:
+{context}
+
+Question: {query}
+
+Instructions:
+1. Be concise and direct in your answer
+2. If the context contains specific numbers, dates, or technical terms, include them in your answer
+3. If the answer requires steps or a list, format it appropriately
+4. Cite specific parts of the context that support your answer
+5. Only use information from the provided context
+
+Answer:
+"""
+
+# Specialized template for document summarization
+DOCUMENT_SUMMARY_TEMPLATE = """
+You are an expert document analyst. Based ONLY on the provided context chunks from the document, provide a comprehensive summary.
+
+Context:
+{context}
+
+Instructions:
+1. Identify the main topic or purpose of the document
+2. Summarize the key points, findings, or arguments
+3. Note any significant data, statistics, or evidence mentioned
+4. Highlight the organizational structure if apparent
+5. Mention any limitations or gaps that are evident in these excerpts
+6. Do not introduce information not present in the context
+
+Summary:
+"""
+
+# Template for comparing/contrasting document sections
+DOCUMENT_COMPARE_TEMPLATE = """
+Analyze the following context chunks from the document and compare/contrast the information they contain.
+
+Context:
+{context}
+
+Instructions:
+1. Identify common themes or topics across the chunks
+2. Highlight any contradictions or inconsistencies
+3. Note progression of ideas or arguments
+4. Identify any relationships between different sections
+5. Only use information present in the provided context
+
+Analysis:
+"""
+
+# Template for technical document analysis
+TECHNICAL_DOCUMENT_TEMPLATE = """
+You are a technical documentation specialist. Analyze the following code or technical content from the document.
+
+Technical content:
+{context}
+
+Question: {query}
+
+Instructions:
+1. If code is present, explain its purpose and functionality
+2. Identify any APIs, functions, or important components
+3. Note any technical requirements or dependencies mentioned
+4. Highlight best practices or implementation details
+5. Only use information from the provided context
+
+Analysis:
+"""
 
 def get_logging_config() -> Dict[str, Any]:
     """Get logging configuration dictionary."""

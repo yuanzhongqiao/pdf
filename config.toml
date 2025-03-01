@@ -6,3 +6,4 @@ textColor = "#31333F"
 
 [server]
 maxUploadSize = 20
+runOnSave = true
