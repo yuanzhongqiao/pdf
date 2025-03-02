@@ -137,10 +137,12 @@ MIT License
 
 Navid Mirnouri - navid72m@gmail.com
 
+
 ## 🔗 Quick Links
 
 - **Live Demo**: [https://navidchatbot.streamlit.app/](https://navidchatbot.streamlit.app/)
 - **Repository**: [GitHub Project](https://github.com/yourusername/document-embedding-system)
+
 
 ---
 
