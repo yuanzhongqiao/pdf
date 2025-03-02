@@ -4,6 +4,10 @@
 
 This advanced Retrieval-Augmented Generation (RAG) system is a sophisticated document processing and question-answering platform that leverages state-of-the-art natural language processing techniques. The system combines intelligent document extraction, semantic embedding, vector search, and generative AI to provide accurate and contextual responses to user queries.
 
+## 🌐 Deployed Version
+
+Check out the live demo of the RAG Document QA System: [https://navidchatbot.streamlit.app/](https://navidchatbot.streamlit.app/)
+
 ## 🚀 Key Features
 
 ### 1. Intelligent Document Processing
@@ -132,6 +136,11 @@ MIT License
 ## 📞 Contact
 
 Navid Mirnouri - navid72m@gmail.com
+
+## 🔗 Quick Links
+
+- **Live Demo**: [https://navidchatbot.streamlit.app/](https://navidchatbot.streamlit.app/)
+- **Repository**: [GitHub Project](https://github.com/yourusername/document-embedding-system)
 
 ---
 
