@@ -51,10 +51,8 @@ def load_spacy_model():
         import spacy
         return spacy.load("en_core_web_sm")
     except OSError:
-        import subprocess
-        import sys
-        subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
-        import spacy
+        import spacy.cli
+        spacy.cli.download("en_core_web_sm")
         return spacy.load("en_core_web_sm")
 
 # Load spaCy model to ensure it's available
