@@ -9,6 +9,7 @@ import tempfile
 import logging
 from dotenv import load_dotenv
 
+
 # Add the current directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -42,6 +43,22 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+
+# Add spaCy model download for cloud deployment
+@st.cache_resource
+def load_spacy_model():
+    try:
+        import spacy
+        return spacy.load("en_core_web_sm")
+    except OSError:
+        import subprocess
+        import sys
+        subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+        import spacy
+        return spacy.load("en_core_web_sm")
+
+# Load spaCy model to ensure it's available
+_ = load_spacy_model()
 # Initialize session state
 if "document_count" not in st.session_state:
     st.session_state.document_count = 0

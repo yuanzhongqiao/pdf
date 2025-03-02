@@ -23,9 +23,11 @@ PyMuPDF>=1.18.20
 openai>=1.0.0
 
 # Knowledge Graph dependencies
+
+neo4j>=5.0.0
+networkx>=2.5
+matplotlib>=3.4.0
 spacy>=3.0.0
-networkx>=2.8.0
-matplotlib>=3.5.0
 
 # Utilities
 tqdm>=4.65.0
