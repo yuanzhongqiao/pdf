@@ -91,7 +91,7 @@ document_id = processor.process_document('path/to/document.pdf')
 MIT License
 
 ## 📞 Contact
-Navid Mirnouri - navid72m@gmail.com   
+Navid Mirnouri - navid72m@gmail.com
 
 ---
 
