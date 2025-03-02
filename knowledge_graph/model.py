@@ -74,23 +74,29 @@ class KnowledgeGraph:
     def add_relation(self, relation: Relation) -> str:
         """
         Add a relation between entities.
-        
+
         Args:
             relation: Relation to add
-            
+
         Returns:
             Relation ID
         """
-        # Check if both entities exist
+        # Ensure source entity exists
         if relation.source not in self.entities:
-            logger.error(f"Source entity {relation.source} not found")
-            raise ValueError(f"Source entity {relation.source} not found")
+            logger.warning(f"Source entity {relation.source} not found. Auto-creating entity.")
+            # Auto-create entity (optional)
+            self.entities[relation.source] = Entity(name=f"Unknown-{relation.source}", type="Unknown")
+            self.graph.add_node(relation.source, name=f"Unknown-{relation.source}", type="Unknown")
+
+        # Ensure target entity exists
         if relation.target not in self.entities:
-            logger.error(f"Target entity {relation.target} not found")
-            raise ValueError(f"Target entity {relation.target} not found")
+            logger.warning(f"Target entity {relation.target} not found. Auto-creating entity.")
+            # Auto-create entity (optional)
+            self.entities[relation.target] = Entity(name=f"Unknown-{relation.target}", type="Unknown")
+            self.graph.add_node(relation.target, name=f"Unknown-{relation.target}", type="Unknown")
+
+        # Now safe to add relation
         logger.info(f"Adding relation: {self.entities[relation.source].name} --[{relation.type}]--> {self.entities[relation.target].name}")
-        
-        # Add edge to graph
         self.graph.add_edge(
             relation.source,
             relation.target,
@@ -99,15 +105,11 @@ class KnowledgeGraph:
             metadata=relation.metadata,
             id=relation.id
         )
-        logger.info(f"Added relation: {self.entities[relation.source].name} --[{relation.type}]--> {self.entities[relation.target].name}")
-        
+
         # Store relation
         self.relations[relation.id] = relation
-
-
-        
-        logger.info(f"Added relation: {self.entities[relation.source].name} --[{relation.type}]--> {self.entities[relation.target].name}")
         return relation.id
+
     
     def get_entity(self, entity_id: str) -> Optional[Entity]:
         """

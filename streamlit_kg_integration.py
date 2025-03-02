@@ -312,7 +312,8 @@ def enhance_search_ui(rag_engine):
                     st.markdown("### Sources")
                     for i, doc in enumerate(results["retrieved_documents"]):
                         with st.expander(f"Source {i+1}"):
-                            st.text_area("Content", doc["text"], height=150)
+                            st.text_area("Content", doc["text"], height=150, key=f"text_area_{i}")
+
                             st.text(f"Relevance: {doc.get('score', 0):.2f}")
                             if "graph_score" in doc:
                                 st.text(f"Graph Relevance: {doc.get('graph_score', 0):.2f}")
@@ -330,7 +331,8 @@ def enhance_search_ui(rag_engine):
                 st.markdown("### Sources")
                 for i, doc in enumerate(results["retrieved_documents"]):
                     with st.expander(f"Source {i+1}"):
-                        st.text_area("Content", doc["text"], height=150)
+                        st.text_area("Content", doc["text"], height=150, key=f"text_area_{i}")
+
                         st.text(f"Relevance: {doc.get('score', 0):.2f}")
 
 
