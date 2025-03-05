@@ -8,6 +8,40 @@ This advanced Retrieval-Augmented Generation (RAG) system is a sophisticated doc
 
 Check out the live demo of the RAG Document QA System: [https://navidchatbot.streamlit.app/](https://navidchatbot.streamlit.app/)
 
+## 🏗️ System Architecture
+
+```mermaid
+flowchart TD
+    User(["User"]) <--> UI["Web Interface\n(Streamlit)"]
+    API(["External Systems"]) <--> APIServer["API Server\n(FastAPI)"]
+    
+    subgraph Core["RAG System Core"]
+        direction TB
+        RAGEngine["RAG Engine"] <--> DocProcessor["Document Processor"]
+        RAGEngine <--> VectorDB["Vector Database"]
+        RAGEngine <--> LLM["Language Models"]
+        RAGEngine <--> KG["Knowledge Graph"]
+    end
+    
+    UI <--> Core
+    APIServer <--> Core
+    
+    Documents[("Document\nCollection")] --> DocProcessor
+    
+    class RAGEngine,KG primary
+    class User,API,Documents secondary
+```
+
+The system employs a modular architecture combining vector search with knowledge graph capabilities:
+
+1. **Document Processor** intelligently extracts, chunks, and prepares documents for embedding
+2. **Vector Database** provides efficient similarity search using state-of-the-art indexing
+3. **Knowledge Graph** captures semantic relationships between document entities
+4. **RAG Engine** orchestrates the retrieval and generation process
+5. **Language Models** generate contextual responses based on retrieved information
+
+The system is accessible through both a **Streamlit web interface** for direct user interaction and a **FastAPI server** for programmatic integration with other applications.
+
 ## 🚀 Key Features
 
 ### 1. Intelligent Document Processing
@@ -68,6 +102,7 @@ pip install -r requirements.txt
 - **Vector Database**: Efficient document storage and retrieval
 - **RAG Engine**: Combine retrieval and generation
 - **LLM Integration**: Multiple language model backends
+- **Knowledge Graph**: Enhance retrieval with entity relationships
 
 ## 💡 Usage Example
 

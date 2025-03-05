@@ -73,6 +73,10 @@ def integrate_knowledge_graph_to_sidebar(rag_engine):
         with st.spinner("Rebuilding knowledge graph..."):
             enhancer.build_knowledge_graph(reset=True)
             st.session_state.knowledge_graph = enhancer.get_knowledge_graph()
+            logger.info("Knowledge graph rebuilt")
+            logger.info(f"Knowledge graph summary: {enhancer.get_knowledge_graph().generate_summary()}")
+            # Store knowledge graph in session state
+        
             st.sidebar.success("Knowledge graph rebuilt!")
             # Force rerun to update metrics
             st.rerun()
